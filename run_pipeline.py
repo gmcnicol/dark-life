@@ -1,5 +1,28 @@
-#!/usr/bin/env python3
-"""Pipeline orchestration script (placeholder)."""
+"""Simple pipeline runner orchestrating the dark-life scripts."""
 
-if __name__ == "__main__":
-    print("Pipeline not implemented yet.")
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import typer
+
+app = typer.Typer(add_completion=False)
+
+
+@app.command()
+def main() -> None:
+    """Run the full content pipeline."""
+    subprocess.run([sys.executable, "scripts/fetch_reddit.py"], check=True)
+    subprocess.run([sys.executable, "scripts/generate_voiceover.py"], check=True)
+    subprocess.run([sys.executable, "scripts/generate_subtitles.py"], check=True)
+    for story in sorted(Path("content/stories").glob("*.md")):
+        story_id = story.stem.split("_", 1)[-1]
+        subprocess.run([sys.executable, "scripts/create_video.py", story_id], check=True)
+    subprocess.run([sys.executable, "scripts/update_dashboard.py"], check=True)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    app()
+
