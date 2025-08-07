@@ -24,3 +24,7 @@ You can also use the provided `Makefile`:
 make sync
 make run
 ```
+
+## Configuration
+
+Copy `sample.env` to `.env` and fill in the required API keys. The project uses `python-dotenv` to load these values automatically.

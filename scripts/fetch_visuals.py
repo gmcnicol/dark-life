@@ -4,6 +4,10 @@ import requests
 import frontmatter
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
 

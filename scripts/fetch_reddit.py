@@ -7,8 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict
 
+from dotenv import load_dotenv
 import typer
 import requests
+
+load_dotenv()
 
 try:
     import praw
