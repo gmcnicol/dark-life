@@ -12,7 +12,18 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_first(pattern: str) -> Optional[Path]:
-    matches = sorted(Path().glob(pattern))
+    """Return the first file matching ``pattern``.
+
+    ``Path().glob(pattern)`` interprets the pattern from the current working
+    directory which can produce incorrect results when the pattern contains
+    directory components. Instead, resolve the pattern into a :class:`Path`
+    object and perform the glob against its parent directory using the
+    basename. This keeps the search scoped to the intended directory and
+    mirrors the previous behaviour of returning the first match or ``None``.
+    """
+
+    path = Path(pattern)
+    matches = sorted(path.parent.glob(path.name))
     return matches[0] if matches else None
 
 
