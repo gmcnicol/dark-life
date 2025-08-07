@@ -10,7 +10,14 @@ dependencies = [
     "praw",
     "requests",
     "typer",
+    "pydub",
+    "jinja2",
 ]
 
 [project.scripts]
 fetch-reddit = "scripts.fetch_reddit:app"
+generate-voiceover = "scripts.generate_voiceover:app"
+generate-subtitles = "scripts.generate_subtitles:app"
+create-video = "scripts.create_video:app"
+update-dashboard = "scripts.update_dashboard:app"
+run-pipeline = "run_pipeline:app"
