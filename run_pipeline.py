@@ -6,7 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 import typer
+
+load_dotenv()
 
 app = typer.Typer(add_completion=False)
 
