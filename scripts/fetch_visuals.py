@@ -11,6 +11,9 @@ HEADERS = {
     "Authorization": PEXELS_API_KEY
 }
 
+# Timeout for all network requests (seconds)
+REQUEST_TIMEOUT = 10
+
 def extract_keywords_from_story(filepath):
     """Extract nouns or key phrases from the story text (simple heuristic)."""
     post = frontmatter.load(filepath)
@@ -25,18 +28,34 @@ def fetch_images(keywords, out_dir, per_keyword=3):
             "query": keyword,
             "per_page": per_keyword
         }
-        response = requests.get(PEXELS_SEARCH_URL, headers=HEADERS, params=params)
-        if response.status_code != 200:
-            print(f"Failed for {keyword}: {response.status_code}")
+        try:
+            response = requests.get(
+                PEXELS_SEARCH_URL,
+                headers=HEADERS,
+                params=params,
+                timeout=REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+        except requests.RequestException as e:
+            print(f"Failed for {keyword}: {e}")
             continue
         data = response.json()
         for i, photo in enumerate(data.get("photos", [])):
             url = photo["src"]["original"]
             ext = Path(url).suffix
             out_path = Path(out_dir) / f"{keyword}_{i}{ext}"
-            with open(out_path, "wb") as f:
-                f.write(requests.get(url).content)
-            print(f"Downloaded: {out_path}")
+            try:
+                with requests.get(
+                    url, timeout=REQUEST_TIMEOUT, stream=True
+                ) as img_resp:
+                    img_resp.raise_for_status()
+                    with open(out_path, "wb") as f:
+                        for chunk in img_resp.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                print(f"Downloaded: {out_path}")
+            except requests.RequestException as e:
+                print(f"Failed to download {url}: {e}")
 
 if __name__ == "__main__":
     import argparse
