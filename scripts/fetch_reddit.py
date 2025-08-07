@@ -44,12 +44,7 @@ def _fetch_via_requests(subreddit: str, limit: int) -> List[Dict]:
     return [child["data"] for child in data["data"]["children"]]
 
 
-def _fetch_via_praw(subreddit: str, limit: int) -> List[Dict]:
-    reddit = praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        user_agent=os.getenv("REDDIT_USER_AGENT", "dark-life-script"),
-    )
+def _fetch_via_praw(reddit: "praw.Reddit", subreddit: str, limit: int) -> List[Dict]:
     posts = []
     for submission in reddit.subreddit(subreddit).top(limit=limit):
         posts.append(
@@ -95,10 +90,17 @@ def main(
     use_praw = praw is not None and all(
         os.getenv(var) for var in ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"]
     )
+    reddit = None
+    if use_praw:
+        reddit = praw.Reddit(
+            client_id=os.getenv("REDDIT_CLIENT_ID"),
+            client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+            user_agent=os.getenv("REDDIT_USER_AGENT", "dark-life-script"),
+        )
     index = 1
     for subreddit in subreddits:
         if use_praw:
-            posts = _fetch_via_praw(subreddit, limit)
+            posts = _fetch_via_praw(reddit, subreddit, limit)
         else:
             posts = _fetch_via_requests(subreddit, limit)
         for post in _filter_posts(posts):
