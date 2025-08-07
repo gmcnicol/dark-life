@@ -27,12 +27,22 @@ def _sentences(text: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _seconds_to_hhmmss(total_seconds: int) -> str:
+    """Convert total seconds to HH:MM:SS string."""
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
 def _write_srt(sentences: List[str], out_path: Path) -> None:
     lines = []
     start = 0
     for idx, sent in enumerate(sentences, 1):
         end = start + 3
-        lines.append(f"{idx}\n00:00:{start:02},000 --> 00:00:{end:02},000\n{sent}\n")
+        lines.append(
+            f"{idx}\n{_seconds_to_hhmmss(start)},000 --> {_seconds_to_hhmmss(end)},000\n{sent}\n"
+        )
         start = end
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -46,7 +56,9 @@ def _write_ass(sentences: List[str], out_path: Path) -> None:
     start = 0
     for sent in sentences:
         end = start + 3
-        lines.append(f"Dialogue: 0,0:00:{start:02}.00,0:00:{end:02}.00,{sent}")
+        lines.append(
+            f"Dialogue: 0,{_seconds_to_hhmmss(start)}.00,{_seconds_to_hhmmss(end)}.00,{sent}"
+        )
         start = end
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
