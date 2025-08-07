@@ -6,7 +6,15 @@ Automation for dark storytelling video pipeline.
 
 This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
 
-To install dependencies:
+To set up the project and install dependencies:
+
+```bash
+make init
+```
+
+This will create a local virtual environment (if needed) and install dependencies via uv.
+
+You can also call uv directly:
 
 ```bash
 uv sync
@@ -21,8 +29,8 @@ uv run run_pipeline.py
 You can also use the provided `Makefile`:
 
 ```bash
-make sync
-make run
+make init   # create venv and install dependencies
+make run    # run the pipeline
 ```
 
 ## Configuration
