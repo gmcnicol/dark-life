@@ -12,6 +12,7 @@ dependencies = [
     "typer",
     "pydub",
     "jinja2",
+    "python-frontmatter",
 ]
 
 [project.scripts]
