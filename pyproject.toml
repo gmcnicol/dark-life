@@ -1,0 +1,16 @@
+[project]
+name = "dark-life"
+version = "0.1.0"
+description = "Automation for dark storytelling video pipeline"
+authors = [{name = "AutoGen", email = "autogen@example.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "praw",
+    "requests",
+    "typer",
+]
+
+[project.scripts]
+fetch-reddit = "scripts.fetch_reddit:app"
