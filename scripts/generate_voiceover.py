@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -17,6 +18,13 @@ except Exception:  # pragma: no cover
     Sine = None  # type: ignore
 
 
+engine: Any | None = None
+if pyttsx3:
+    try:
+        engine = pyttsx3.init()
+    except Exception:
+        engine = None
+
 app = typer.Typer(add_completion=False)
 
 
@@ -29,11 +37,10 @@ def _read_story(path: Path) -> str:
     return text.strip()
 
 
-def _synth_with_pyttsx3(text: str, dest: Path) -> bool:
-    if not pyttsx3:
+def _synth_with_pyttsx3(engine: Any | None, text: str, dest: Path) -> bool:
+    if not pyttsx3 or not engine:
         return False
     try:
-        engine = pyttsx3.init()
         engine.save_to_file(text, str(dest))
         engine.runAndWait()
         return True
@@ -59,13 +66,17 @@ def main(
 ) -> None:
     """Generate voiceovers for all stories."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    for story_path in sorted(input_dir.glob("*.md")):
-        dest = output_dir / f"{story_path.stem}.mp3"
-        if dest.exists():
-            continue
-        text = _read_story(story_path)
-        if not _synth_with_pyttsx3(text, dest):
-            _placeholder_audio(text, dest)
+    try:
+        for story_path in sorted(input_dir.glob("*.md")):
+            dest = output_dir / f"{story_path.stem}.mp3"
+            if dest.exists():
+                continue
+            text = _read_story(story_path)
+            if not _synth_with_pyttsx3(engine, text, dest):
+                _placeholder_audio(text, dest)
+    finally:
+        if engine:
+            engine.stop()
 
 
 if __name__ == "__main__":  # pragma: no cover
