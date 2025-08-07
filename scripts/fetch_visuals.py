@@ -7,9 +7,10 @@ from pathlib import Path
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
 
-HEADERS = {
-    "Authorization": PEXELS_API_KEY
-}
+if not PEXELS_API_KEY:
+    raise RuntimeError("PEXELS_API_KEY environment variable is required")
+
+HEADERS = {"Authorization": PEXELS_API_KEY}
 
 def extract_keywords_from_story(filepath):
     """Extract nouns or key phrases from the story text (simple heuristic)."""
@@ -46,9 +47,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="content/visuals", help="Directory to save images")
 
     args = parser.parse_args()
-
-    if not PEXELS_API_KEY:
-        raise RuntimeError("Set PEXELS_API_KEY in environment")
 
     keywords = extract_keywords_from_story(args.story)
     print(f"Extracted keywords: {keywords}")
