@@ -21,3 +21,10 @@ generate-subtitles = "scripts.generate_subtitles:app"
 create-video = "scripts.create_video:app"
 update-dashboard = "scripts.update_dashboard:app"
 run-pipeline = "run_pipeline:app"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
