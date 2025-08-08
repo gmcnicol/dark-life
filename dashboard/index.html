@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Render Dashboard</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    th, td { border: 1px solid #ccc; padding: 4px 8px; }
+    th { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h1>Render Dashboard</h1>
+  <section>
+    <h2>Queued Jobs</h2>
+    <table id="queue">
+      <thead>
+        <tr><th>File</th><th>Story</th><th>Images</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Completed Manifests</h2>
+    <table id="manifests">
+      <thead>
+        <tr><th>Story</th><th>Video</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+  <script>
+    async function fetchJSON(path) {
+      const res = await fetch(path);
+      if (!res.ok) return null;
+      return res.json();
+    }
+
+    async function listFiles(dir) {
+      const res = await fetch(dir);
+      if (!res.ok) return [];
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      return Array.from(doc.querySelectorAll('a'))
+        .map(a => a.getAttribute('href'))
+        .filter(h => h && h.endsWith('.json'));
+    }
+
+    async function loadQueue() {
+      const tbody = document.querySelector('#queue tbody');
+      tbody.innerHTML = '';
+      const files = await listFiles('../render_queue/');
+      if (files.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="3">No queued jobs</td>';
+        tbody.appendChild(tr);
+        return;
+      }
+      for (const file of files) {
+        const data = await fetchJSON('../render_queue/' + file);
+        const story = data && data.story_path ? data.story_path.split('/').pop() : '';
+        const count = data && Array.isArray(data.image_paths) ? data.image_paths.length : 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${file}</td><td>${story}</td><td>${count}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadManifests() {
+      const tbody = document.querySelector('#manifests tbody');
+      tbody.innerHTML = '';
+      const files = await listFiles('../output/manifest/');
+      if (files.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="2">No completed manifests</td>';
+        tbody.appendChild(tr);
+        return;
+      }
+      for (const file of files) {
+        const data = await fetchJSON('../output/manifest/' + file);
+        const story = data && data.story ? data.story : file.replace(/\.json$/, '');
+        const video = data && data.video ? `<a href="${data.video}">link</a>` : '';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${story}</td><td>${video}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function refresh() {
+      await loadQueue();
+      await loadManifests();
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>
