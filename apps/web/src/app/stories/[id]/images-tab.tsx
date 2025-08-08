@@ -36,6 +36,7 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       }),
+    onSuccess: () => refetch(),
   });
 
   function toggleSelected(index: number) {
