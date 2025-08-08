@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-dark_life}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  api:
+    image: tiangolo/uvicorn-gunicorn-fastapi:python3.11
+    volumes:
+      - ..:/app
+    env_file:
+      - ../apps/api/.env
+    environment:
+      MODULE_NAME: apps.api.main
+      VARIABLE_NAME: app
+      PORT: 8000
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8000:8000"
+
+  web:
+    image: node:20
+    working_dir: /app/apps/web
+    volumes:
+      - ..:/app
+    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ../apps/web/.env
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
