@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { marked } from "marked";
 import ImagesTab from "./images-tab";
@@ -40,6 +40,7 @@ export default function StoryEditorPage({
   const [toast, setToast] = useState<Toast | null>(null);
   const isInitial = useRef(true);
   const [tab, setTab] = useState<"content" | "images">("content");
+  const queryClient = useQueryClient();
 
   const { data: images } = useQuery({
     queryKey: ["images", id],
@@ -53,7 +54,7 @@ export default function StoryEditorPage({
     setTimeout(() => setToast(null), 3000);
   }
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["story", id],
     queryFn: () => apiFetch<Story>(`/stories/${id}`),
   });
@@ -71,9 +72,25 @@ export default function StoryEditorPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       }),
+    onMutate: async (patch) => {
+      await queryClient.cancelQueries({ queryKey: ["story", id] });
+      const previous = queryClient.getQueryData<Story>(["story", id]);
+      if (previous) {
+        queryClient.setQueryData<Story>(["story", id], {
+          ...previous,
+          ...patch,
+        });
+      }
+      return { previous };
+    },
+    onError: (err: unknown, _patch, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(["story", id], ctx.previous);
+      }
+      showToast({ type: "error", message: (err as Error).message });
+    },
     onSuccess: () => showToast({ type: "success", message: "Saved" }),
-    onError: (err: unknown) =>
-      showToast({ type: "error", message: (err as Error).message }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["story", id] }),
   });
 
   const enqueueMutation = useMutation({
@@ -108,15 +125,47 @@ export default function StoryEditorPage({
 
   const preview = useMemo(() => marked.parse(form?.body_md ?? ""), [form?.body_md]);
 
-  if (!form) {
-    return <p className="p-4">Loading...</p>;
+  useEffect(() => {
+    function handleShortcut(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (form) {
+          mutation.mutate({
+            title: form.title,
+            body_md: form.body_md,
+            status: form.status,
+          });
+        }
+      }
+      if (e.key === "a" || e.key === "A") {
+        e.preventDefault();
+        setForm((f) => f && { ...f, status: "approved" });
+        mutation.mutate({ status: "approved" });
+      }
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        enqueueMutation.mutate();
+      }
+    }
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [form, mutation, enqueueMutation]);
+
+  if (isLoading || !form) {
+    return (
+      <div className="p-6 space-y-4 animate-pulse">
+        <div className="h-8 bg-neutral-800 rounded w-1/3" />
+        <div className="h-6 bg-neutral-800 rounded w-24" />
+        <div className="h-96 bg-neutral-800 rounded" />
+      </div>
+    );
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-6 space-y-6">
       {toast && (
         <div
-          className={`fixed top-4 right-4 px-4 py-2 rounded text-white ${
+          className={`fixed top-4 right-4 px-4 py-2 rounded text-white shadow ${
             toast.type === "success" ? "bg-green-600" : "bg-red-600"
           }`}
         >
@@ -128,7 +177,7 @@ export default function StoryEditorPage({
           )}
         </div>
       )}
-      <div className="flex gap-4 border-b pb-2">
+      <div className="flex gap-4 border-b border-neutral-800 pb-2">
         <button
           className={`px-3 py-1 ${
             tab === "content" ? "border-b-2 border-white" : "text-gray-500"
@@ -147,7 +196,7 @@ export default function StoryEditorPage({
         </button>
       </div>
       <button
-        className="border px-3 py-1 rounded"
+        className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50"
         disabled={
           form.status !== "approved" || selectedCount === 0 || enqueueMutation.isLoading
         }
@@ -159,14 +208,14 @@ export default function StoryEditorPage({
         <>
           <input
             type="text"
-            className="border p-2 w-full rounded"
+            className="border border-neutral-700 bg-neutral-900 p-2 w-full rounded"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
           <div>
             <label className="mr-2">Status:</label>
             <select
-              className="border rounded p-1"
+              className="border border-neutral-700 bg-neutral-900 rounded p-1"
               value={form.status}
               onChange={(e) =>
                 setForm({ ...form, status: e.target.value as Story["status"] })
@@ -178,12 +227,12 @@ export default function StoryEditorPage({
           </div>
           <div className="flex gap-4">
             <textarea
-              className="w-1/2 border p-2 rounded h-96"
+              className="w-1/2 border border-neutral-700 bg-neutral-900 p-2 rounded h-96"
               value={form.body_md}
               onChange={(e) => setForm({ ...form, body_md: e.target.value })}
             />
             <div
-              className="w-1/2 border p-2 rounded h-96 overflow-auto"
+              className="w-1/2 border border-neutral-700 p-2 rounded h-96 overflow-auto"
               dangerouslySetInnerHTML={{ __html: preview }}
             />
           </div>
