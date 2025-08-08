@@ -22,7 +22,15 @@ def main() -> None:
     subprocess.run([sys.executable, "scripts/generate_subtitles.py"], check=True)
     for story in sorted(Path("content/stories").glob("*.md")):
         story_id = story.stem.split("_", 1)[-1]
-        subprocess.run([sys.executable, "scripts/create_video.py", story_id], check=True)
+        subprocess.run(
+            [
+                sys.executable,
+                "scripts/create_slideshow.py",
+                "--story_id",
+                story_id,
+            ],
+            check=True,
+        )
     subprocess.run([sys.executable, "scripts/update_dashboard.py"], check=True)
 
 
