@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { marked } from "marked";
+import ImagesTab from "./images-tab";
 
 interface Story {
   id: string;
@@ -23,6 +24,7 @@ export default function StoryEditorPage({
   const [form, setForm] = useState<Story | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const isInitial = useRef(true);
+  const [tab, setTab] = useState<"content" | "images">("content");
 
   function showToast(toast: Toast) {
     setToast(toast);
@@ -85,36 +87,59 @@ export default function StoryEditorPage({
           {toast.message}
         </div>
       )}
-      <input
-        type="text"
-        className="border p-2 w-full rounded"
-        value={form.title}
-        onChange={(e) => setForm({ ...form, title: e.target.value })}
-      />
-      <div>
-        <label className="mr-2">Status:</label>
-        <select
-          className="border rounded p-1"
-          value={form.status}
-          onChange={(e) =>
-            setForm({ ...form, status: e.target.value as Story["status"] })
-          }
+      <div className="flex gap-4 border-b pb-2">
+        <button
+          className={`px-3 py-1 ${
+            tab === "content" ? "border-b-2 border-white" : "text-gray-500"
+          }`}
+          onClick={() => setTab("content")}
         >
-          <option value="draft">Draft</option>
-          <option value="approved">Approved</option>
-        </select>
+          Content
+        </button>
+        <button
+          className={`px-3 py-1 ${
+            tab === "images" ? "border-b-2 border-white" : "text-gray-500"
+          }`}
+          onClick={() => setTab("images")}
+        >
+          Images
+        </button>
       </div>
-      <div className="flex gap-4">
-        <textarea
-          className="w-1/2 border p-2 rounded h-96"
-          value={form.body_md}
-          onChange={(e) => setForm({ ...form, body_md: e.target.value })}
-        />
-        <div
-          className="w-1/2 border p-2 rounded h-96 overflow-auto"
-          dangerouslySetInnerHTML={{ __html: preview }}
-        />
-      </div>
+      {tab === "content" && (
+        <>
+          <input
+            type="text"
+            className="border p-2 w-full rounded"
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+          />
+          <div>
+            <label className="mr-2">Status:</label>
+            <select
+              className="border rounded p-1"
+              value={form.status}
+              onChange={(e) =>
+                setForm({ ...form, status: e.target.value as Story["status"] })
+              }
+            >
+              <option value="draft">Draft</option>
+              <option value="approved">Approved</option>
+            </select>
+          </div>
+          <div className="flex gap-4">
+            <textarea
+              className="w-1/2 border p-2 rounded h-96"
+              value={form.body_md}
+              onChange={(e) => setForm({ ...form, body_md: e.target.value })}
+            />
+            <div
+              className="w-1/2 border p-2 rounded h-96 overflow-auto"
+              dangerouslySetInnerHTML={{ __html: preview }}
+            />
+          </div>
+        </>
+      )}
+      {tab === "images" && <ImagesTab storyId={id} />}
     </div>
   );
 }
