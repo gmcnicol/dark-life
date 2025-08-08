@@ -16,6 +16,12 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 cli = typer.Typer()
 
 
+@cli.callback()
+def main() -> None:
+    """CLI entry point for the web application."""
+    pass
+
+
 @app.route("/")
 def index():
     stories = sorted(config.STORIES_DIR.glob("*.md"))
