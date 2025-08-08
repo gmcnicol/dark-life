@@ -1,4 +1,4 @@
-.PHONY: init sync run-webapp run-renderer run-uploader
+.PHONY: init sync test run-webapp run-renderer run-uploader
 
 VENV_DIR := .venv
 
@@ -22,3 +22,6 @@ run-renderer:
 
 run-uploader:
 	uv run python -m video_uploader.cron_upload run
+
+test:
+	uv run --with pytest pytest -q
