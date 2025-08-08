@@ -1,5 +1,8 @@
 {
   "name": "dark-life",
   "private": true,
-  "workspaces": ["packages/*"]
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }
