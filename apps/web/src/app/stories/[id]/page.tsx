@@ -13,7 +13,22 @@ interface Story {
   status: "draft" | "approved";
 }
 
-type Toast = { type: "success" | "error"; message: string };
+interface Asset {
+  id: string;
+  selected: boolean;
+}
+
+interface Job {
+  id: string;
+  status: string;
+}
+
+type Toast = {
+  type: "success" | "error";
+  message: string;
+  link?: string;
+  linkText?: string;
+};
 
 export default function StoryEditorPage({
   params,
@@ -25,6 +40,13 @@ export default function StoryEditorPage({
   const [toast, setToast] = useState<Toast | null>(null);
   const isInitial = useRef(true);
   const [tab, setTab] = useState<"content" | "images">("content");
+
+  const { data: images } = useQuery({
+    queryKey: ["images", id],
+    queryFn: () => apiFetch<Asset[]>(`/stories/${id}/images`),
+  });
+
+  const selectedCount = images?.filter((img) => img.selected).length ?? 0;
 
   function showToast(toast: Toast) {
     setToast(toast);
@@ -50,6 +72,20 @@ export default function StoryEditorPage({
         body: JSON.stringify(patch),
       }),
     onSuccess: () => showToast({ type: "success", message: "Saved" }),
+    onError: (err: unknown) =>
+      showToast({ type: "error", message: (err as Error).message }),
+  });
+
+  const enqueueMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<Job>(`/stories/${id}/enqueue-render`, { method: "POST" }),
+    onSuccess: (job) =>
+      showToast({
+        type: "success",
+        message: `Job ${job.status}`,
+        link: "/jobs",
+        linkText: "View jobs",
+      }),
     onError: (err: unknown) =>
       showToast({ type: "error", message: (err as Error).message }),
   });
@@ -85,6 +121,11 @@ export default function StoryEditorPage({
           }`}
         >
           {toast.message}
+          {toast.link && (
+            <a href={toast.link} className="underline ml-2">
+              {toast.linkText ?? "Link"}
+            </a>
+          )}
         </div>
       )}
       <div className="flex gap-4 border-b pb-2">
@@ -105,6 +146,15 @@ export default function StoryEditorPage({
           Images
         </button>
       </div>
+      <button
+        className="border px-3 py-1 rounded"
+        disabled={
+          form.status !== "approved" || selectedCount === 0 || enqueueMutation.isLoading
+        }
+        onClick={() => enqueueMutation.mutate()}
+      >
+        Queue for render
+      </button>
       {tab === "content" && (
         <>
           <input
