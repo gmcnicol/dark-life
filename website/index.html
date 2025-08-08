@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reddit Auth Redirect</title>
+  <style>
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #333; padding: 4px 8px; }
+    button { margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Query Parameters</h1>
+  <table id="params">
+    <thead>
+      <tr><th>Parameter</th><th>Value</th><th>Copy</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const tbody = document.querySelector('#params tbody');
+    for (const [key, value] of params.entries()) {
+      const tr = document.createElement('tr');
+      const keyTd = document.createElement('td');
+      keyTd.textContent = key;
+      const valueTd = document.createElement('td');
+      valueTd.textContent = value;
+      const copyTd = document.createElement('td');
+      const btn = document.createElement('button');
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', () => navigator.clipboard.writeText(value));
+      copyTd.appendChild(btn);
+      tr.appendChild(keyTd);
+      tr.appendChild(valueTd);
+      tr.appendChild(copyTd);
+      tbody.appendChild(tr);
+    }
+  </script>
+</body>
+</html>
