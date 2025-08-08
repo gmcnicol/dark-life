@@ -1,25 +1,32 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <title>Dark Life Webapp</title>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dark Life Webapp</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <h1>Dark Life Story Manager</h1>
-  <form method="post" action="/fetch">
-    <button type="submit">Fetch Stories</button>
-  </form>
-  <h2>Stories</h2>
-  <ul>
-    {% for story in stories %}
-    <li>
-      <form method="post" action="/queue">
-        <input type="hidden" name="story" value="{{ story }}" />
-        {{ story }} Images: <input type="text" name="images" placeholder="img1.jpg img2.jpg" />
-        <button type="submit">Queue for Render</button>
-      </form>
-    </li>
-    {% endfor %}
-  </ul>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="bg-gray-800 p-4 flex items-center justify-between shadow">
+    <h1 class="text-xl font-bold">Dark Life Story Manager</h1>
+    <form method="post" action="/fetch">
+      <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded">Fetch Stories</button>
+    </form>
+  </header>
+  <main class="flex-1 p-4 overflow-y-auto">
+    <h2 class="text-lg mb-4">Stories</h2>
+    <ul class="space-y-4">
+      {% for story in stories %}
+      <li class="bg-gray-800 p-4 rounded flex items-center justify-between">
+        <span class="font-mono">{{ story }}</span>
+        <form method="post" action="/queue" class="flex items-center space-x-2">
+          <input type="hidden" name="story" value="{{ story }}" />
+          <input type="text" name="images" placeholder="img1.jpg img2.jpg" class="bg-gray-700 text-gray-100 px-2 py-1 rounded placeholder-gray-400" />
+          <button type="submit" class="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded">Queue</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </main>
 </body>
 </html>
