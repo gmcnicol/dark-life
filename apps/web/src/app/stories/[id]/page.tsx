@@ -14,7 +14,7 @@ interface Story {
 }
 
 interface Asset {
-  id: string;
+  id: number;
   selected: boolean;
 }
 

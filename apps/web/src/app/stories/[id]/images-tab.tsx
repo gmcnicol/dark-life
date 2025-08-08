@@ -6,7 +6,7 @@ import Image from "next/image";
 import { apiFetch } from "@/lib/api";
 
 interface Asset {
-  id: string;
+  id: number;
   remote_url: string;
   selected: boolean;
   rank: number;
@@ -31,7 +31,7 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
   });
 
   const patchMutation = useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Partial<Asset> }) =>
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<Asset> }) =>
       apiFetch(`/stories/${storyId}/images/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
