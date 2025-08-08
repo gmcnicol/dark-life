@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import os
 from typing import List
 
 from flask import Flask, redirect, render_template, request, url_for
@@ -36,11 +36,25 @@ def fetch():
 
 @app.post("/queue")
 def queue_story():
-    story_name = request.form.get("story")
-    images = request.form.get("images", "").split()
-    story_path = settings.STORIES_DIR / story_name
-    image_paths: List[str] = [str((settings.VISUALS_DIR / img).resolve()) for img in images if img]
-    job = {"story_path": str(story_path.resolve()), "image_paths": image_paths}
+    story_name = os.path.basename(request.form.get("story", ""))
+    images = [os.path.basename(i) for i in request.form.get("images", "").split()]
+
+    story_dir = settings.STORIES_DIR.resolve()
+    story_path = (story_dir / story_name).resolve()
+    if not story_name or not story_path.is_file() or not story_path.is_relative_to(story_dir):
+        return ("Invalid story path", 400)
+
+    visuals_dir = settings.VISUALS_DIR.resolve()
+    image_paths: List[str] = []
+    for img in images:
+        if not img:
+            continue
+        img_path = (visuals_dir / img).resolve()
+        if not img_path.is_file() or not img_path.is_relative_to(visuals_dir):
+            return ("Invalid image path", 400)
+        image_paths.append(str(img_path))
+
+    job = {"story_path": str(story_path), "image_paths": image_paths}
     settings.RENDER_QUEUE_DIR.mkdir(exist_ok=True)
     job_file = settings.RENDER_QUEUE_DIR / f"{story_path.stem}.json"
     job_file.write_text(json.dumps(job, indent=2))
