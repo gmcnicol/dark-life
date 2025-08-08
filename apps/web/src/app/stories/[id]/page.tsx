@@ -7,7 +7,7 @@ import { marked } from "marked";
 import ImagesTab from "./images-tab";
 
 interface Story {
-  id: string;
+  id: number;
   title: string;
   body_md: string;
   status: "draft" | "approved";
