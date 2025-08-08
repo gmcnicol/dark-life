@@ -16,5 +16,14 @@ def upload(video: Path, caption: str, username: str, password: str) -> None:
         print("instagrapi not installed; skipping upload")
         return
     cl = Client()
-    cl.login(username, password)
-    cl.video_upload(str(video), caption)
+    try:
+        cl.login(username, password)
+    except Exception as exc:  # pragma: no cover - handled gracefully
+        print(f"Instagram login failed: {exc}")
+        return
+
+    try:
+        cl.video_upload(str(video), caption)
+    except Exception as exc:  # pragma: no cover - handled gracefully
+        print(f"Instagram upload failed: {exc}")
+        return
