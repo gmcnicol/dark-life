@@ -25,6 +25,14 @@ webapp = "webapp.main:cli"
 render-jobs = "video_renderer.render_job_runner:app"
 upload-videos = "video_uploader.cron_upload:app"
 
+[tool.setuptools]
+packages = [
+    "shared",
+    "webapp",
+    "video_renderer",
+    "video_uploader",
+]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
