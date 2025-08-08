@@ -209,4 +209,9 @@ __marimo__/
 content/audio/voiceovers/
 content/audio/music/
 content/visuals/
-output/videos/
+output/videos/*
+!output/videos/.gitkeep
+output/manifest/*
+!output/manifest/.gitkeep
+render_queue/*
+!render_queue/.gitkeep
