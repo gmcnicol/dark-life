@@ -9,7 +9,7 @@ from typing import Any
 import typer
 
 from . import create_slideshow, voiceover, whisper_subs
-from shared import config
+from shared.config import settings
 from shared.types import RenderJob
 
 app = typer.Typer(add_completion=False)
@@ -27,29 +27,29 @@ def _process_job(job: RenderJob) -> None:
     story_id = job.story_path.stem
     # Generate voiceover and subtitles
     voiceover.main(
-        input_dir=config.STORIES_DIR,
-        output_dir=config.CONTENT_DIR / "audio" / "voiceovers",
+        input_dir=settings.STORIES_DIR,
+        output_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
     )
     whisper_subs.main(
-        input_dir=config.CONTENT_DIR / "audio" / "voiceovers",
-        stories_dir=config.STORIES_DIR,
+        input_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
+        stories_dir=settings.STORIES_DIR,
     )
     # Create video slideshow
     create_slideshow.main(["--story_id", story_id])
     # Write manifest
-    config.MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+    settings.MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     manifest = {
         "story": story_id,
-        "video": str((config.VIDEO_OUTPUT_DIR / f"{story_id}_final.mp4").resolve()),
+        "video": str((settings.VIDEO_OUTPUT_DIR / f"{story_id}_final.mp4").resolve()),
     }
-    (config.MANIFEST_DIR / f"{story_id}.json").write_text(json.dumps(manifest, indent=2))
+    (settings.MANIFEST_DIR / f"{story_id}.json").write_text(json.dumps(manifest, indent=2))
 
 
 @app.command()
 def run() -> None:
     """Process all jobs in the render queue."""
-    config.RENDER_QUEUE_DIR.mkdir(exist_ok=True)
-    for job_file in sorted(config.RENDER_QUEUE_DIR.glob("*.json")):
+    settings.RENDER_QUEUE_DIR.mkdir(exist_ok=True)
+    for job_file in sorted(settings.RENDER_QUEUE_DIR.glob("*.json")):
         job = _load_job(job_file)
         _process_job(job)
         job_file.unlink()

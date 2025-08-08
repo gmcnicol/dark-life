@@ -9,7 +9,7 @@ from typing import List
 from flask import Flask, redirect, render_template, request, url_for
 import typer
 
-from shared import config
+from shared.config import settings
 from shared.reddit import fetch_top_stories
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -24,7 +24,7 @@ def main() -> None:
 
 @app.route("/")
 def index():
-    stories = sorted(config.STORIES_DIR.glob("*.md"))
+    stories = sorted(settings.STORIES_DIR.glob("*.md"))
     return render_template("index.html", stories=[s.name for s in stories])
 
 
@@ -38,11 +38,11 @@ def fetch():
 def queue_story():
     story_name = request.form.get("story")
     images = request.form.get("images", "").split()
-    story_path = config.STORIES_DIR / story_name
-    image_paths: List[str] = [str((config.VISUALS_DIR / img).resolve()) for img in images if img]
+    story_path = settings.STORIES_DIR / story_name
+    image_paths: List[str] = [str((settings.VISUALS_DIR / img).resolve()) for img in images if img]
     job = {"story_path": str(story_path.resolve()), "image_paths": image_paths}
-    config.RENDER_QUEUE_DIR.mkdir(exist_ok=True)
-    job_file = config.RENDER_QUEUE_DIR / f"{story_path.stem}.json"
+    settings.RENDER_QUEUE_DIR.mkdir(exist_ok=True)
+    job_file = settings.RENDER_QUEUE_DIR / f"{story_path.stem}.json"
     job_file.write_text(json.dumps(job, indent=2))
     return redirect(url_for("index"))
 
