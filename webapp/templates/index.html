@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <title>Dark Life Webapp</title>
+  <meta charset="utf-8" />
+</head>
+<body>
+  <h1>Dark Life Story Manager</h1>
+  <form method="post" action="/fetch">
+    <button type="submit">Fetch Stories</button>
+  </form>
+  <h2>Stories</h2>
+  <ul>
+    {% for story in stories %}
+    <li>
+      <form method="post" action="/queue">
+        <input type="hidden" name="story" value="{{ story }}" />
+        {{ story }} Images: <input type="text" name="images" placeholder="img1.jpg img2.jpg" />
+        <button type="submit">Queue for Render</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+</body>
+</html>

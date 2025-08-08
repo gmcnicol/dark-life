@@ -7,6 +7,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
+    "flask",
     "praw",
     "requests",
     "typer",
@@ -14,25 +15,19 @@ dependencies = [
     "jinja2",
     "python-frontmatter",
     "python-dotenv",
+    "instagrapi",
+    "pywhatkit",
+    "yt-dlp",
 ]
 
 [project.scripts]
-fetch-reddit = "scripts.fetch_reddit:app"
-generate-voiceover = "scripts.generate_voiceover:app"
-generate-subtitles = "scripts.generate_subtitles:app"
-create-video = "scripts.create_video:app"
-update-dashboard = "scripts.update_dashboard:app"
-run-pipeline = "run_pipeline:app"
+webapp = "webapp.main:cli"
+render-jobs = "video_renderer.render_job_runner:app"
+upload-videos = "video_uploader.cron_upload:app"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-py-modules = ["run_pipeline"]
-
-[tool.setuptools.packages.find]
-include = ["scripts"]
 
 [tool.uv]
 package = true

@@ -1,27 +1,28 @@
-"""Fetch top Reddit stories and save them as Markdown files."""
+"""Utilities for fetching Reddit stories."""
 
 from __future__ import annotations
 
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
 
 from dotenv import load_dotenv
-import typer
 import requests
+import typer
 
 load_dotenv()
 
-try:
-    import praw
+try:  # Optional dependency
+    import praw  # type: ignore
 except ImportError:  # pragma: no cover - praw optional
-    praw = None
+    praw = None  # type: ignore
 
 app = typer.Typer(add_completion=False)
 
 
 def _save_markdown(post: Dict, output_dir: Path, index: int) -> Path:
+    """Save a Reddit post as a Markdown file and return its path."""
     date_str = datetime.utcfromtimestamp(post["created_utc"]).strftime("%Y-%m-%d")
     filename = f"{date_str}_story{index:02d}.md"
     path = output_dir / filename
@@ -79,16 +80,17 @@ def _filter_posts(posts: List[Dict]) -> List[Dict]:
     return filtered
 
 
-@app.command()
-def main(
-    subreddits: List[str] = typer.Option(
-        ["nosleep", "confession", "TrueOffMyChest"],
-        help="Subreddits to pull from",
-    ),
-    limit: int = typer.Option(5, help="Number of posts per subreddit"),
-    output_dir: Path = typer.Option(Path("content/stories"), help="Where to save stories"),
-) -> None:
-    """Fetch stories and write them as markdown files."""
+def fetch_top_stories(
+    subreddits: List[str] | None = None,
+    limit: int = 5,
+    output_dir: Path = Path("content/stories"),
+) -> List[Path]:
+    """Fetch stories and write them as markdown files.
+
+    Returns the paths of the created markdown files.
+    """
+    if subreddits is None:
+        subreddits = ["nosleep", "confession", "TrueOffMyChest"]
     output_dir.mkdir(parents=True, exist_ok=True)
     use_praw = praw is not None and all(
         os.getenv(var) for var in ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"]
@@ -100,15 +102,30 @@ def main(
             client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
             user_agent=os.getenv("REDDIT_USER_AGENT", "dark-life-script"),
         )
+    created: List[Path] = []
     index = 1
     for subreddit in subreddits:
-        if use_praw:
+        if use_praw and reddit is not None:
             posts = _fetch_via_praw(reddit, subreddit, limit)
         else:
             posts = _fetch_via_requests(subreddit, limit)
         for post in _filter_posts(posts):
-            _save_markdown(post, output_dir, index)
+            created.append(_save_markdown(post, output_dir, index))
             index += 1
+    return created
+
+
+@app.command()
+def main(
+    subreddits: List[str] = typer.Option(
+        ["nosleep", "confession", "TrueOffMyChest"],
+        help="Subreddits to pull from",
+    ),
+    limit: int = typer.Option(5, help="Number of posts per subreddit"),
+    output_dir: Path = typer.Option(Path("content/stories"), help="Where to save stories"),
+) -> None:
+    """CLI wrapper for :func:`fetch_top_stories`."""
+    fetch_top_stories(subreddits=subreddits, limit=limit, output_dir=output_dir)
 
 
 if __name__ == "__main__":  # pragma: no cover
