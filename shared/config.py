@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 load_dotenv()
@@ -22,6 +23,10 @@ class Settings(BaseSettings):
     VIDEO_OUTPUT_DIR: Path = OUTPUT_DIR / "videos"
     MANIFEST_DIR: Path = OUTPUT_DIR / "manifest"
     RENDER_QUEUE_DIR: Path = BASE_DIR / "render_queue"
+    DATABASE_URL: str = Field(
+        default="postgresql://postgres:postgres@localhost:5432/darklife",
+        description="Postgres connection string",
+    )
 
 
 settings = Settings()

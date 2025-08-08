@@ -6,7 +6,7 @@ import { useState } from "react";
 import { apiFetch } from "@/lib/api";
 
 interface Story {
-  id: string;
+  id: number;
   title: string;
 }
 
@@ -42,7 +42,7 @@ export default function StoriesPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiFetch(`/stories/${id}`, { method: "DELETE" }),
+    mutationFn: (id: number) => apiFetch(`/stories/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["stories"] });
       showToast({ type: "success", message: "Story deleted" });
