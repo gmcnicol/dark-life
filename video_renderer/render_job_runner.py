@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
+import logging
 import typer
 
 from . import create_slideshow, voiceover, whisper_subs
 from shared.config import settings
 from shared.types import RenderJob
 
+logger = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False)
 
 
@@ -23,19 +24,36 @@ def _load_job(path: Path) -> RenderJob:
     )
 
 
-def _process_job(job: RenderJob) -> None:
+def _process_job(job: RenderJob) -> bool:
     story_id = job.story_path.stem
-    # Generate voiceover and subtitles
-    voiceover.main(
-        input_dir=settings.STORIES_DIR,
-        output_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
-    )
-    whisper_subs.main(
-        input_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
-        stories_dir=settings.STORIES_DIR,
-    )
+
+    # Generate voiceover
+    try:
+        voiceover.main(
+            input_dir=settings.STORIES_DIR,
+            output_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
+        )
+    except Exception:
+        logger.exception("Voiceover generation failed for %s", story_id)
+        return False
+
+    # Create subtitles
+    try:
+        whisper_subs.main(
+            input_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
+            stories_dir=settings.STORIES_DIR,
+        )
+    except Exception:
+        logger.exception("Subtitle creation failed for %s", story_id)
+        return False
+
     # Create video slideshow
-    create_slideshow.main(["--story_id", story_id])
+    try:
+        create_slideshow.main(["--story_id", story_id])
+    except Exception:
+        logger.exception("Slideshow rendering failed for %s", story_id)
+        return False
+
     # Write manifest
     settings.MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -43,6 +61,7 @@ def _process_job(job: RenderJob) -> None:
         "video": str((settings.VIDEO_OUTPUT_DIR / f"{story_id}_final.mp4").resolve()),
     }
     (settings.MANIFEST_DIR / f"{story_id}.json").write_text(json.dumps(manifest, indent=2))
+    return True
 
 
 @app.command()
@@ -50,9 +69,20 @@ def run() -> None:
     """Process all jobs in the render queue."""
     settings.RENDER_QUEUE_DIR.mkdir(exist_ok=True)
     for job_file in sorted(settings.RENDER_QUEUE_DIR.glob("*.json")):
-        job = _load_job(job_file)
-        _process_job(job)
-        job_file.unlink()
+        try:
+            job = _load_job(job_file)
+        except Exception:
+            logger.exception("Failed to load job %s", job_file)
+            continue
+
+        try:
+            success = _process_job(job)
+        except Exception:
+            logger.exception("Unexpected error processing job %s", job_file)
+            continue
+
+        if success:
+            job_file.unlink()
 
 
 if __name__ == "__main__":  # pragma: no cover
