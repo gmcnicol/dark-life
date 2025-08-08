@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 from pydub import AudioSegment
 import typer
@@ -48,31 +48,41 @@ def _format_ass_time(seconds: float) -> str:
     return f"{hours:02}:{minutes:02}:{secs:02}.{centis:02}"
 
 
-def _write_srt(sentences: List[str], out_path: Path, per_sentence: float) -> None:
-    lines = []
+def _timings(duration: float, count: int) -> List[Tuple[float, float]]:
+    """Return a list of (start, end) pairs for ``count`` segments."""
+    if count == 0:
+        return []
+    per_sentence = duration / count
+    timings: List[Tuple[float, float]] = []
     start = 0.0
-    for idx, sent in enumerate(sentences, 1):
+    for _ in range(count):
         end = start + per_sentence
+        timings.append((start, end))
+        start = end
+    return timings
+
+
+def _write_srt(sentences: List[str], out_path: Path, duration: float) -> None:
+    lines = []
+    for idx, (sent, (start, end)) in enumerate(
+        zip(sentences, _timings(duration, len(sentences))), 1
+    ):
         lines.append(
             f"{idx}\n{_format_srt_time(start)} --> {_format_srt_time(end)}\n{sent}\n"
         )
-        start = end
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _write_ass(sentences: List[str], out_path: Path, per_sentence: float) -> None:
+def _write_ass(sentences: List[str], out_path: Path, duration: float) -> None:
     header = (
         "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, Bold\n"
         "Style: Default,Arial,20,&H00FFFFFF,0\n[Events]\nFormat: Layer, Start, End, Text"
     )
     lines = [header]
-    start = 0.0
-    for sent in sentences:
-        end = start + per_sentence
+    for sent, (start, end) in zip(sentences, _timings(duration, len(sentences))):
         lines.append(
             f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},{sent}"
         )
-        start = end
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -92,11 +102,10 @@ def main(
         sentences = _sentences(text)
         audio = AudioSegment.from_file(voice_path)
         duration = len(audio) / 1000.0
-        per_sentence = duration / len(sentences) if sentences else 0
         if fmt == "ass":
-            _write_ass(sentences, out_path, per_sentence)
+            _write_ass(sentences, out_path, duration)
         else:
-            _write_srt(sentences, out_path, per_sentence)
+            _write_srt(sentences, out_path, duration)
 
 
 if __name__ == "__main__":  # pragma: no cover
