@@ -20,7 +20,10 @@ def run(insta_user: str = "", insta_pass: str = "") -> None:
         data = json.loads(manifest.read_text())
         video = Path(data["video"])
         caption = data.get("title", "")
-        upload_to_instagram.upload(video, caption, insta_user, insta_pass)
+        if insta_user and insta_pass:
+            upload_to_instagram.upload(video, caption, insta_user, insta_pass)
+        else:
+            print("Instagram credentials missing; skipping upload")
         upload_to_tiktok.upload(video, caption)
         manifest.unlink()
 
