@@ -20,6 +20,7 @@ dependencies = [
     "yt-dlp",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    "fastapi",
 ]
 
 [project.scripts]
@@ -33,6 +34,7 @@ packages = [
     "webapp",
     "video_renderer",
     "video_uploader",
+    "apps.api",
 ]
 
 [build-system]
