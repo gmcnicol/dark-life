@@ -1,15 +1,29 @@
-"""Shared configuration constants."""
+"""Application configuration loaded from environment variables."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CONTENT_DIR = BASE_DIR / "content"
-STORIES_DIR = CONTENT_DIR / "stories"
-AUDIO_DIR = CONTENT_DIR / "audio"
-VISUALS_DIR = CONTENT_DIR / "visuals"
-OUTPUT_DIR = BASE_DIR / "output"
-VIDEO_OUTPUT_DIR = OUTPUT_DIR / "videos"
-MANIFEST_DIR = OUTPUT_DIR / "manifest"
-RENDER_QUEUE_DIR = BASE_DIR / "render_queue"
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
+
+load_dotenv()
+
+
+class Settings(BaseSettings):
+    """Application settings read from environment variables."""
+
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent
+    CONTENT_DIR: Path = BASE_DIR / "content"
+    STORIES_DIR: Path = CONTENT_DIR / "stories"
+    AUDIO_DIR: Path = CONTENT_DIR / "audio"
+    VISUALS_DIR: Path = CONTENT_DIR / "visuals"
+    OUTPUT_DIR: Path = BASE_DIR / "output"
+    VIDEO_OUTPUT_DIR: Path = OUTPUT_DIR / "videos"
+    MANIFEST_DIR: Path = OUTPUT_DIR / "manifest"
+    RENDER_QUEUE_DIR: Path = BASE_DIR / "render_queue"
+
+
+settings = Settings()
+
+__all__ = ["Settings", "settings"]

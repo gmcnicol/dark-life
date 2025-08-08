@@ -18,6 +18,8 @@ dependencies = [
     "instagrapi",
     "pywhatkit",
     "yt-dlp",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
 ]
 
 [project.scripts]
