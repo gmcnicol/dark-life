@@ -6,13 +6,14 @@ import json
 from pathlib import Path
 from typing import List
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, url_for
 import typer
 
 from shared import config
 from shared.reddit import fetch_top_stories
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = "dev"
 cli = typer.Typer()
 
 
@@ -39,7 +40,18 @@ def queue_story():
     story_name = request.form.get("story")
     images = request.form.get("images", "").split()
     story_path = config.STORIES_DIR / story_name
-    image_paths: List[str] = [str((config.VISUALS_DIR / img).resolve()) for img in images if img]
+    if not story_path.exists():
+        flash("Story not found")
+        return redirect(url_for("index"))
+
+    image_paths: List[str] = []
+    for img in images:
+        image_path = config.VISUALS_DIR / img
+        if not image_path.exists():
+            flash(f"Image not found: {img}")
+            return redirect(url_for("index"))
+        image_paths.append(str(image_path.resolve()))
+
     job = {"story_path": str(story_path.resolve()), "image_paths": image_paths}
     config.RENDER_QUEUE_DIR.mkdir(exist_ok=True)
     job_file = config.RENDER_QUEUE_DIR / f"{story_path.stem}.json"
