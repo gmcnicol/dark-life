@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import List
 
+from pydub import AudioSegment
 import typer
 
 app = typer.Typer(add_completion=False)
@@ -27,37 +28,49 @@ def _sentences(text: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def _seconds_to_hhmmss(total_seconds: int) -> str:
-    """Convert total seconds to HH:MM:SS string."""
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    seconds = total_seconds % 60
-    return f"{hours:02}:{minutes:02}:{seconds:02}"
+def _format_srt_time(seconds: float) -> str:
+    """Format seconds as SRT timestamp."""
+    ms = int(round(seconds * 1000))
+    hours = ms // 3_600_000
+    minutes = (ms % 3_600_000) // 60_000
+    secs = (ms % 60_000) // 1000
+    millis = ms % 1000
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
-def _write_srt(sentences: List[str], out_path: Path) -> None:
+def _format_ass_time(seconds: float) -> str:
+    """Format seconds as ASS timestamp."""
+    cs = int(round(seconds * 100))
+    hours = cs // 360_000
+    minutes = (cs % 360_000) // 6_000
+    secs = (cs % 6_000) // 100
+    centis = cs % 100
+    return f"{hours:02}:{minutes:02}:{secs:02}.{centis:02}"
+
+
+def _write_srt(sentences: List[str], out_path: Path, per_sentence: float) -> None:
     lines = []
-    start = 0
+    start = 0.0
     for idx, sent in enumerate(sentences, 1):
-        end = start + 3
+        end = start + per_sentence
         lines.append(
-            f"{idx}\n{_seconds_to_hhmmss(start)},000 --> {_seconds_to_hhmmss(end)},000\n{sent}\n"
+            f"{idx}\n{_format_srt_time(start)} --> {_format_srt_time(end)}\n{sent}\n"
         )
         start = end
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _write_ass(sentences: List[str], out_path: Path) -> None:
+def _write_ass(sentences: List[str], out_path: Path, per_sentence: float) -> None:
     header = (
         "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, Bold\n"
         "Style: Default,Arial,20,&H00FFFFFF,0\n[Events]\nFormat: Layer, Start, End, Text"
     )
     lines = [header]
-    start = 0
+    start = 0.0
     for sent in sentences:
-        end = start + 3
+        end = start + per_sentence
         lines.append(
-            f"Dialogue: 0,{_seconds_to_hhmmss(start)}.00,{_seconds_to_hhmmss(end)}.00,{sent}"
+            f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},{sent}"
         )
         start = end
     out_path.write_text("\n".join(lines), encoding="utf-8")
@@ -77,10 +90,13 @@ def main(
             continue
         text = _load_story_text(voice_path, stories_dir)
         sentences = _sentences(text)
+        audio = AudioSegment.from_file(voice_path)
+        duration = len(audio) / 1000.0
+        per_sentence = duration / len(sentences) if sentences else 0
         if fmt == "ass":
-            _write_ass(sentences, out_path)
+            _write_ass(sentences, out_path, per_sentence)
         else:
-            _write_srt(sentences, out_path)
+            _write_srt(sentences, out_path, per_sentence)
 
 
 if __name__ == "__main__":  # pragma: no cover
