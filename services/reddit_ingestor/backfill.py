@@ -31,7 +31,14 @@ from .monitoring import (
     REJECTED_POSTS,
 )
 from .normalizer import normalize_post
-from .storage import insert_post, record_rejection, run_with_session
+from .media import extract_image_urls
+from .events import push_new_story
+from .storage import (
+    insert_post,
+    is_fuzzy_duplicate,
+    record_rejection,
+    run_with_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +95,21 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[dat
         for post in posts:
             normalized, reason = normalize_post(post)
             created_dt = datetime.fromtimestamp(int(post.get("created_utc", 0)), tz=timezone.utc)
+            fullname = post.get("name") or f"t3_{post.get('id')}"
             if normalized:
+                if is_fuzzy_duplicate(session, subreddit, normalized.title, normalized.body):
+                    duplicates += 1
+                    record_rejection(
+                        session,
+                        fullname,
+                        subreddit,
+                        "fuzzy_duplicate",
+                        post,
+                    )
+                    continue
+
                 payload = {
-                    "reddit_id": post.get("name") or f"t3_{post.get('id')}",
+                    "reddit_id": fullname,
                     "subreddit": subreddit,
                     "title": normalized.title,
                     "author": post.get("author"),
@@ -103,9 +122,11 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[dat
                     "upvotes": int(post.get("ups") or post.get("score") or 0),
                     "num_comments": int(post.get("num_comments") or 0),
                     "hash_title_body": normalized.hash_title_body,
+                    "image_urls": extract_image_urls(post),
                 }
                 if insert_post(session, payload):
                     inserted += 1
+                    push_new_story(payload)
                     if earliest_dt is None or created_dt < earliest_dt:
                         earliest_dt = created_dt
                 else:
@@ -115,7 +136,7 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[dat
                 # Record why the post was rejected for auditing
                 record_rejection(
                     session,
-                    post.get("name") or post.get("id") or "",
+                    fullname,
                     subreddit,
                     reason or "unknown",
                     post,

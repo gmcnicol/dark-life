@@ -48,6 +48,7 @@ def test_insert_post_deduplication(ingestor_env):
         "upvotes": 1,
         "num_comments": 0,
         "hash_title_body": "hash1",
+        "image_urls": [],
     }
     assert storage.insert_post(session, payload) is True
     assert storage.insert_post(session, payload) is False
@@ -133,3 +134,72 @@ def test_incremental_idempotency(ingestor_env, monkeypatch):
     first = incremental.fetch_incremental("testsub", client=client)
     second = incremental.fetch_incremental("testsub", client=client)
     assert first == 2 and second == 0
+
+
+def test_cross_subreddit_fuzzy_dedup(ingestor_env, monkeypatch):
+    storage = ingestor_env.storage
+    backfill = ingestor_env.backfill
+    normalizer = ingestor_env.normalizer
+    monkeypatch.setattr(normalizer, "detect", lambda text: "en")
+    monkeypatch.setattr(backfill, "push_new_story", lambda payload: None)
+
+    post1 = {
+        "id": "1",
+        "name": "t3_1",
+        "title": "Hello World",
+        "selftext": "same body " * 5,
+        "url": "http://x/1",
+        "author": "a",
+        "created_utc": 1,
+        "over_18": False,
+    }
+    post2 = {
+        "id": "2",
+        "name": "t3_2",
+        "title": "Hello World!",
+        "selftext": "same body " * 5 + "extra",
+        "url": "http://x/2",
+        "author": "b",
+        "created_utc": 2,
+        "over_18": False,
+    }
+
+    backfill._process_posts("sub1", [post1])
+    inserted, _ = backfill._process_posts("sub2", [post2])
+    assert inserted == 0
+    with storage.engine.connect() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM reddit_posts")).scalar()
+    assert count == 1
+    with storage.engine.connect() as conn:
+        reason = conn.execute(text("SELECT reason FROM reddit_rejections")).scalar()
+    assert reason == "fuzzy_duplicate"
+
+
+def test_image_url_extraction_and_event_push(ingestor_env, monkeypatch):
+    storage = ingestor_env.storage
+    backfill = ingestor_env.backfill
+    normalizer = ingestor_env.normalizer
+    monkeypatch.setattr(normalizer, "detect", lambda text: "en")
+    captured = []
+    monkeypatch.setattr(backfill, "push_new_story", lambda payload: captured.append(payload))
+
+    post = {
+        "id": "img",
+        "name": "t3_img",
+        "title": "Image",
+        "selftext": "body img " * 5,
+        "url": "https://i.redd.it/img.jpg",
+        "author": "c",
+        "created_utc": 0,
+        "over_18": False,
+        "preview": {"images": [{"source": {"url": "https://i.redd.it/img.jpg"}}]},
+    }
+
+    inserted, _ = backfill._process_posts("pics", [post])
+    assert inserted == 1 and captured
+    with storage.engine.connect() as conn:
+        urls = conn.execute(
+            text("SELECT image_urls FROM reddit_posts WHERE reddit_id='t3_img'")
+        ).scalar()
+    assert "i.redd.it" in urls
+    assert captured[0]["image_urls"][0].startswith("https://i.redd.it")
