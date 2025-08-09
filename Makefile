@@ -37,4 +37,4 @@ smoke:
 	uv run python scripts/smoke_e2e.py
 
 test:
-	uv run --with pytest pytest -q
+	uv run --with pytest,httpx pytest -q
