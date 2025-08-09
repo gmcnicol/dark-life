@@ -2,13 +2,17 @@ from __future__ import annotations
 
 """Simple poller that processes queued render jobs from the jobs table."""
 
+import json
 import sqlite3
 import time
 from pathlib import Path
 
+import requests
 import typer
 
 from shared.config import settings
+from shared.types import RenderJob
+from video_renderer import render_job_runner
 
 app = typer.Typer(add_completion=False)
 
@@ -47,16 +51,76 @@ def process_once(conn: sqlite3.Connection) -> bool:
     if row is None:
         return False
 
-    job_id, payload = row
-    # Mark running
-    conn.execute("UPDATE jobs SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
+    job_id, payload_json = row
+    conn.execute(
+        "UPDATE jobs SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (job_id,),
+    )
     conn.commit()
 
-    # Print payload for demonstration
-    print(payload)
+    payload = json.loads(payload_json)
+    # Display raw payload for logging/debugging purposes
+    print(payload_json)
+    story_id = payload.get("story_id")
+    image_urls = payload.get("image_urls")
+    if image_urls is None:
+        # Legacy payload format; mark success without processing
+        conn.execute(
+            "UPDATE jobs SET status = 'success', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (job_id,),
+        )
+        conn.commit()
+        return True
 
-    # Mark success
-    conn.execute("UPDATE jobs SET status = 'success', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
+    voiceover_url = payload.get("voiceover_url")
+
+    image_paths: list[Path] = []
+    settings.VISUALS_DIR.mkdir(parents=True, exist_ok=True)
+    for idx, url in enumerate(image_urls):
+        dest = settings.VISUALS_DIR / f"{story_id}_{idx}.jpg"
+        try:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            dest.write_bytes(resp.content)
+            image_paths.append(dest)
+        except Exception:
+            conn.execute(
+                "UPDATE jobs SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (job_id,),
+            )
+            conn.commit()
+            return True
+
+    if voiceover_url:
+        voice_dir = settings.CONTENT_DIR / "audio" / "voiceovers"
+        voice_dir.mkdir(parents=True, exist_ok=True)
+        voice_path = voice_dir / f"{story_id}.mp3"
+        try:
+            resp = requests.get(voiceover_url, timeout=30)
+            resp.raise_for_status()
+            voice_path.write_bytes(resp.content)
+        except Exception:
+            conn.execute(
+                "UPDATE jobs SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (job_id,),
+            )
+            conn.commit()
+            return True
+
+    job = RenderJob(
+        story_path=settings.STORIES_DIR / f"{story_id}.md",
+        image_paths=image_paths,
+    )
+
+    try:
+        success = render_job_runner._process_job(job)
+    except Exception:
+        success = False
+
+    conn.execute(
+        "UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        ("success" if success else "failed", job_id),
+    )
     conn.commit()
     return True
 
