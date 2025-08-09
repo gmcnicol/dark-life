@@ -92,7 +92,7 @@ class Asset(SQLModel, table=True):
     provider: Optional[str] = None
     provider_id: Optional[str] = None
     selected: bool = False
-    rank: int = 0
+    rank: Optional[int] = None
     created_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), server_default=func.now())
     )
@@ -109,7 +109,7 @@ class AssetRead(SQLModel):
     id: int
     remote_url: str
     selected: bool = False
-    rank: int = 0
+    rank: Optional[int] = None
 
 
 class AssetUpdate(SQLModel):

@@ -69,6 +69,7 @@ def test_fetch_images_creates_assets(client: TestClient, monkeypatch: pytest.Mon
     assert len(assets) == 2
     urls = {a["remote_url"] for a in assets}
     assert urls == {"http://img/1.jpg", "http://img/2.jpg"}
+    assert all(a["selected"] is False and a["rank"] is None for a in assets)
 
 
 def test_split_endpoint_creates_parts(client: TestClient):
