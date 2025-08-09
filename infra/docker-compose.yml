@@ -48,5 +48,26 @@ services:
     ports:
       - "3000:3000"
 
+  renderer:
+    image: python:3.11
+    working_dir: /app
+    volumes:
+      - ..:/app
+      - output:/output
+    command: sh -c "sleep infinity"
+    profiles:
+      - workers
+
+  uploader:
+    image: python:3.11
+    working_dir: /app
+    volumes:
+      - ..:/app
+      - output:/output
+    command: sh -c "sleep infinity"
+    profiles:
+      - workers
+
 volumes:
   pgdata:
+  output:
