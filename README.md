@@ -2,7 +2,20 @@
 
 Monorepo for automating short-form dark storytelling videos.
 
-## Running with Docker Compose
+## OS dependencies
+
+- `ffmpeg`
+- Node.js 20
+- Python 3.10+
+- Docker & Docker Compose
+
+Install `ffmpeg` on Debian/Ubuntu with:
+
+```bash
+sudo apt install ffmpeg
+```
+
+## Local runbook
 
 1. **Copy environment files**
    - `cp .env.sample .env`
@@ -10,16 +23,39 @@ Monorepo for automating short-form dark storytelling videos.
    - `cp apps/web/.env.sample apps/web/.env`
    - Fill in API keys and secrets as described below.
 
-2. **Start the stack**
+2. **Start core services**
 
 ```bash
-cd infra
-docker compose up --build
+make up
 ```
 
-This brings up Postgres, Redis, the FastAPI backend on port `8000` and the Next.js web app on port `3000`.
+This starts Postgres, Redis, the FastAPI backend on `8000` and the Next.js web app on `3000`.
 
-Visit [`http://localhost:3000`](http://localhost:3000) for the web UI and [`http://localhost:8000/health`](http://localhost:8000/health) for a basic API health check.
+3. **Run the renderer worker**
+
+```bash
+make renderer
+```
+
+4. **Use the web app** – open [`http://localhost:3000`](http://localhost:3000) and create a story, fetch/select images, split into parts, and enqueue the series.
+
+5. **Check outputs** – rendered videos and manifests are written to `output/videos/` and `output/manifest/`.
+
+6. **Upload to YouTube (optional)**
+
+```bash
+make uploader
+```
+
+On first run this performs the OAuth flow and stores the token.
+
+7. **Verify with the smoke test**
+
+```bash
+make smoke
+```
+
+Use `make down` to stop the Docker services when finished.
 
 ## Environment variables
 
@@ -63,7 +99,12 @@ Visit [`http://localhost:3000`](http://localhost:3000) for the web UI and [`http
 
 Existing renderer and uploader services live in the `video_renderer/` and `video_uploader/` directories. The FastAPI backend creates render jobs that these services can consume. Ensure they share access to the same `.env` values and directories (`render_queue/` and `output/`) when running them alongside the stack.
 
-To enable YouTube uploads, obtain OAuth client credentials from Google Cloud, run an OAuth flow to generate a token, and place the resulting files at the paths referenced by `YOUTUBE_CLIENT_SECRETS_FILE` and `YOUTUBE_TOKEN_FILE`. The `upload-videos` CLI will use these files to upload rendered videos automatically.
+## YouTube OAuth setup
+
+1. Create an OAuth client ID (Desktop application) in the Google Cloud Console and download the `client_secrets.json` file.
+2. Save it at the path pointed to by `YOUTUBE_CLIENT_SECRETS_FILE` in your `.env`.
+3. Run `make uploader` once. If `YOUTUBE_TOKEN_FILE` does not exist, a browser window opens to complete the OAuth flow and the token is saved to that path.
+4. Subsequent `make uploader` runs will upload the next rendered part using the stored token.
 
 ## Development
 
