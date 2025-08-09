@@ -5,6 +5,8 @@ import pytest
 
 from apps.api.main import app
 from apps.api.db import get_session
+from apps.api.stories import _extract_keywords
+from apps.api.models import Story
 
 
 @pytest.fixture(name="client")
@@ -80,3 +82,12 @@ def test_split_story_parts_order(client: TestClient):
     second_part_text = parts[1]["body_md"]
     assert "sentence 0" in first_part_text
     assert "sentence 4" in second_part_text
+
+
+def test_extract_keywords_matches_domain_list():
+    story = Story(
+        title="Lonely Cabin",
+        body_md="A forest shadow hides in the attic at night.",
+    )
+    keywords = _extract_keywords(story)
+    assert keywords.split() == ["cabin", "forest", "shadow", "attic", "night"]
