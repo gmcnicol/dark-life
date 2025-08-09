@@ -71,8 +71,6 @@ def test_fetch_images_creates_assets(client: TestClient, monkeypatch: pytest.Mon
     assert urls == {"http://img/1.jpg", "http://img/2.jpg"}
     assert all(a["selected"] is False and a["rank"] is None for a in assets)
 
-
-
 def test_get_images_unranked_last(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     story = client.post("/stories", json={"title": "Ranked"}).json()
 
@@ -96,6 +94,7 @@ def test_get_images_unranked_last(client: TestClient, monkeypatch: pytest.Monkey
     assert res.status_code == 200
     ids = [a["id"] for a in res.json()]
     assert ids == [assets[0]["id"], assets[1]["id"], assets[2]["id"]]
+
 
 
 def test_split_endpoint_creates_parts(client: TestClient):
