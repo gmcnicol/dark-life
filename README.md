@@ -31,13 +31,16 @@ Visit [`http://localhost:3000`](http://localhost:3000) for the web UI and [`http
 | `POSTGRES_PASSWORD` | Password for the Postgres user |
 | `POSTGRES_DB` | Name of the development database |
 | `POSTGRES_PORT` | Local port exposed for Postgres |
+| `DATABASE_URL` | Full connection URL for Postgres |
 | `REDIS_URL` | Connection string for Redis |
 | `PEXELS_API_KEY` | API key used for image search |
 | `PIXABAY_API_KEY` | API key used for image search fallback |
 | `OPENAI_API_KEY` | API key used by renderer services for narration |
 | `ELEVENLABS_API_KEY` | API key for voice synthesis |
+| `WHISPER_MODEL` | Whisper model name to use for transcription |
 | `YOUTUBE_CLIENT_SECRETS_FILE` | Path to OAuth client secrets JSON for YouTube uploads |
 | `YOUTUBE_TOKEN_FILE` | Path to stored OAuth token for YouTube |
+| `NEXT_PUBLIC_API_BASE_URL` | Base URL the web app uses to reach the API |
 
 ### `apps/api/.env`
 
