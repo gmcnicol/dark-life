@@ -1,35 +1,26 @@
-"""Generate placeholder subtitles for voiceover files."""
+"""Generate subtitles from narration audio using faster-whisper.
+
+This module replaces the previous placeholder implementation that simply split
+story text into evenly timed subtitle segments.  Instead we now transcribe the
+actual narration MP3s with the `faster-whisper` library and emit standard SRT
+files.  The main entry point scans a directory of voiceover MP3 files and
+writes the matching ``.srt`` files to an output directory.
+"""
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import Iterable
 
-from pydub import AudioSegment
 import typer
+from faster_whisper import WhisperModel
 
 app = typer.Typer(add_completion=False)
 
 
-def _load_story_text(voice_path: Path, stories_dir: Path) -> str:
-    story_path = stories_dir / f"{voice_path.stem}.md"
-    if not story_path.exists():
-        return ""
-    text = story_path.read_text(encoding="utf-8")
-    if text.startswith("---"):
-        _, _, body = text.partition("---\n\n")
-        return body.strip()
-    return text.strip()
-
-
-def _sentences(text: str) -> List[str]:
-    parts = re.split(r"(?<=[.!?]) +", text)
-    return [p.strip() for p in parts if p.strip()]
-
-
 def _format_srt_time(seconds: float) -> str:
-    """Format seconds as SRT timestamp."""
+    """Return ``HH:MM:SS,mmm`` formatted timestamp for SRT files."""
+
     ms = int(round(seconds * 1000))
     hours = ms // 3_600_000
     minutes = (ms % 3_600_000) // 60_000
@@ -38,74 +29,40 @@ def _format_srt_time(seconds: float) -> str:
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
-def _format_ass_time(seconds: float) -> str:
-    """Format seconds as ASS timestamp."""
-    cs = int(round(seconds * 100))
-    hours = cs // 360_000
-    minutes = (cs % 360_000) // 6_000
-    secs = (cs % 6_000) // 100
-    centis = cs % 100
-    return f"{hours:02}:{minutes:02}:{secs:02}.{centis:02}"
+def _write_srt(segments: Iterable, dest: Path) -> None:
+    """Write recognised ``segments`` to ``dest`` in SRT format."""
 
-
-def _timings(duration: float, count: int) -> List[Tuple[float, float]]:
-    """Return a list of (start, end) pairs for ``count`` segments."""
-    if count == 0:
-        return []
-    per_sentence = duration / count
-    timings: List[Tuple[float, float]] = []
-    start = 0.0
-    for _ in range(count):
-        end = start + per_sentence
-        timings.append((start, end))
-        start = end
-    return timings
-
-
-def _write_srt(sentences: List[str], out_path: Path, duration: float) -> None:
-    lines = []
-    for idx, (sent, (start, end)) in enumerate(
-        zip(sentences, _timings(duration, len(sentences))), 1
-    ):
-        lines.append(
-            f"{idx}\n{_format_srt_time(start)} --> {_format_srt_time(end)}\n{sent}\n"
-        )
-    out_path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _write_ass(sentences: List[str], out_path: Path, duration: float) -> None:
-    header = (
-        "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, Bold\n"
-        "Style: Default,Arial,20,&H00FFFFFF,0\n[Events]\nFormat: Layer, Start, End, Text"
-    )
-    lines = [header]
-    for sent, (start, end) in zip(sentences, _timings(duration, len(sentences))):
-        lines.append(
-            f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},{sent}"
-        )
-    out_path.write_text("\n".join(lines), encoding="utf-8")
+    lines: list[str] = []
+    for idx, seg in enumerate(segments, 1):
+        start = _format_srt_time(seg.start)
+        end = _format_srt_time(seg.end)
+        text = seg.text.strip()
+        lines.append(f"{idx}\n{start} --> {end}\n{text}\n")
+    dest.write_text("\n".join(lines), encoding="utf-8")
 
 
 @app.command()
 def main(
-    input_dir: Path = typer.Option(Path("content/audio/voiceovers"), help="Directory with mp3 files"),
-    stories_dir: Path = typer.Option(Path("content/stories"), help="Directory with source stories"),
-    fmt: str = typer.Option("srt", "--format", help="Subtitle format: srt or ass"),
+    input_dir: Path = typer.Option(
+        Path("content/audio/voiceovers"), help="Directory containing narration MP3s"
+    ),
+    output_dir: Path = typer.Option(
+        Path("content/subtitles"), help="Where to write generated subtitle files"
+    ),
+    model_size: str = typer.Option("tiny", help="Whisper model size"),
 ) -> None:
-    """Create simple subtitles for each voiceover."""
-    fmt = fmt.lower()
+    """Transcribe all narration MP3s in ``input_dir`` to SRT files."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model = WhisperModel(model_size, device="cpu")
+
     for voice_path in sorted(input_dir.glob("*.mp3")):
-        out_path = voice_path.with_suffix(f".{fmt}")
+        out_path = output_dir / f"{voice_path.stem}.srt"
         if out_path.exists():
             continue
-        text = _load_story_text(voice_path, stories_dir)
-        sentences = _sentences(text)
-        audio = AudioSegment.from_file(voice_path)
-        duration = len(audio) / 1000.0
-        if fmt == "ass":
-            _write_ass(sentences, out_path, duration)
-        else:
-            _write_srt(sentences, out_path, duration)
+
+        segments, _info = model.transcribe(str(voice_path))
+        _write_srt(segments, out_path)
 
 
 if __name__ == "__main__":  # pragma: no cover

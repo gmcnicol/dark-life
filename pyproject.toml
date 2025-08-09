@@ -23,6 +23,7 @@ dependencies = [
     "fastapi",
     "sqlmodel",
     "psycopg2-binary",
+    "faster-whisper",
 ]
 
 [project.scripts]

@@ -1,81 +1,34 @@
-import pytest
-from pydub import AudioSegment
-
 from video_renderer import whisper_subs as ws
 
 
-@pytest.mark.parametrize("duration_ms", [3000, 4500, 6000])
-def test_srt_timings_vary_with_audio_length(tmp_path, duration_ms):
+def test_whisper_generates_srt(tmp_path, monkeypatch):
     voice_dir = tmp_path / "voiceovers"
-    story_dir = tmp_path / "stories"
+    subs_dir = tmp_path / "subs"
     voice_dir.mkdir()
-    story_dir.mkdir()
+    subs_dir.mkdir()
 
-    # create audio file
-    audio = AudioSegment.silent(duration=duration_ms)
-    voice_path = voice_dir / "sample.mp3"
-    audio.export(voice_path, format="mp3")
+    # Create a dummy MP3 file; the patched model does not read its contents
+    (voice_dir / "hello.mp3").write_bytes(b"not a real mp3")
 
-    # corresponding story with two sentences
-    (story_dir / "sample.md").write_text("One. Two.", encoding="utf-8")
+    class DummySegment:
+        def __init__(self, start, end, text):
+            self.start = start
+            self.end = end
+            self.text = text
 
-    ws.main(input_dir=voice_dir, stories_dir=story_dir, fmt="srt")
+    class DummyModel:
+        def __init__(self, *args, **kwargs):
+            pass
 
-    srt_path = voice_path.with_suffix(".srt")
-    lines = srt_path.read_text().splitlines()
-    timings = [l for l in lines if " --> " in l]
-    per_sentence = (duration_ms / 1000) / 2
-    expected_first_end = ws._format_srt_time(per_sentence)
-    expected_total = ws._format_srt_time(duration_ms / 1000)
-    assert timings[0] == f"00:00:00,000 --> {expected_first_end}"
-    assert timings[1] == f"{expected_first_end} --> {expected_total}"
+        def transcribe(self, path):  # pragma: no cover - simple stub
+            return [DummySegment(0.0, 1.0, "hello world")], None
 
+    monkeypatch.setattr(ws, "WhisperModel", DummyModel)
 
-def test_ass_timings(tmp_path):
-    voice_dir = tmp_path / "voiceovers"
-    story_dir = tmp_path / "stories"
-    voice_dir.mkdir()
-    story_dir.mkdir()
+    ws.main(input_dir=voice_dir, output_dir=subs_dir, model_size="tiny")
 
-    duration_ms = 4000
-    audio = AudioSegment.silent(duration=duration_ms)
-    voice_path = voice_dir / "story.mp3"
-    audio.export(voice_path, format="mp3")
-    (story_dir / "story.md").write_text("First. Second.", encoding="utf-8")
+    srt_path = subs_dir / "hello.srt"
+    assert srt_path.exists()
+    text = srt_path.read_text(encoding="utf-8").lower()
+    assert "hello" in text and "world" in text
 
-    ws.main(input_dir=voice_dir, stories_dir=story_dir, fmt="ass")
-
-    ass_path = voice_path.with_suffix(".ass")
-    lines = ass_path.read_text().splitlines()
-    dialogue = [l for l in lines if l.startswith("Dialogue")]
-    per_sentence = (duration_ms / 1000) / 2
-    expected_first_end = ws._format_ass_time(per_sentence)
-    expected_total = ws._format_ass_time(duration_ms / 1000)
-    assert dialogue[0] == f"Dialogue: 0,00:00:00.00,{expected_first_end},First."
-    assert dialogue[1] == f"Dialogue: 0,{expected_first_end},{expected_total},Second."
-
-
-def test_srt_three_sentences(tmp_path):
-    voice_dir = tmp_path / "voiceovers"
-    story_dir = tmp_path / "stories"
-    voice_dir.mkdir()
-    story_dir.mkdir()
-
-    duration_ms = 4500
-    audio = AudioSegment.silent(duration=duration_ms)
-    voice_path = voice_dir / "sample.mp3"
-    audio.export(voice_path, format="mp3")
-    (story_dir / "sample.md").write_text("One. Two. Three.", encoding="utf-8")
-
-    ws.main(input_dir=voice_dir, stories_dir=story_dir, fmt="srt")
-
-    srt_path = voice_path.with_suffix(".srt")
-    lines = srt_path.read_text().splitlines()
-    timings = [l for l in lines if " --> " in l]
-    per_sentence = (duration_ms / 1000) / 3
-    first_end = ws._format_srt_time(per_sentence)
-    second_end = ws._format_srt_time(per_sentence * 2)
-    total = ws._format_srt_time(duration_ms / 1000)
-    assert timings[0] == f"00:00:00,000 --> {first_end}"
-    assert timings[1] == f"{first_end} --> {second_end}"
-    assert timings[2] == f"{second_end} --> {total}"

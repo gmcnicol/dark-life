@@ -27,7 +27,9 @@ def expected_filters(subtitle_path: Path | None, dark_overlay: bool, zoom: bool)
         base_filters.append("[vx1]drawbox=t=fill:color=black@0.4[v_dark]")
         last = "[v_dark]"
     if subtitle_path:
-        base_filters.append(f"{last}subtitles={subtitle_path.as_posix()}[v_final]")
+        base_filters.append(
+            f"{last}subtitles='{subtitle_path.as_posix()}'[v_final]"
+        )
         last = "[v_final]"
     return base_filters, last
 

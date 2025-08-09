@@ -67,7 +67,8 @@ def build_video_filters(
         last = "[v_dark]"
 
     if subtitle:
-        filters.append(f"{last}subtitles={subtitle.as_posix()}[v_final]")
+        # Quote the subtitle path to allow for spaces in directories
+        filters.append(f"{last}subtitles='{subtitle.as_posix()}'[v_final]")
         last = "[v_final]"
 
     return filters, last
