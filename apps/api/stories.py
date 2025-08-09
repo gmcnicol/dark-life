@@ -219,9 +219,9 @@ def update_image(
     asset_in: AssetUpdate,
     session: Session = Depends(get_session),
 ) -> AssetRead:
-    """Update selection or rank for an image asset."""
+    """Update fields like ``selected`` or ``rank`` for an image asset."""
     asset = session.get(Asset, asset_id)
-    if not asset or asset.story_id != story_id:
+    if not asset or asset.story_id != story_id or asset.type != "image":
         raise HTTPException(status_code=404, detail="Image not found")
     data = asset_in.model_dump(exclude_unset=True)
     for key, value in data.items():
