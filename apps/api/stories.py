@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 import os
 import re
+import json
+import sqlite3
 from typing import Iterable
 
 import requests
@@ -21,6 +23,7 @@ from .models import (
     StoryRead,
     StoryUpdate,
 )
+from shared.config import settings
 
 
 router = APIRouter(prefix="/stories", tags=["stories"])
@@ -199,6 +202,52 @@ def update_image(
     session.commit()
     session.refresh(asset)
     return asset
+
+
+@router.post("/{story_id}/enqueue-render", status_code=status.HTTP_202_ACCEPTED)
+def enqueue_render(story_id: int, session: Session = Depends(get_session)) -> dict[str, int]:
+    """Validate selected images and enqueue a render job."""
+    story = session.get(Story, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    images = session.exec(
+        select(Asset)
+        .where(Asset.story_id == story_id, Asset.type == "image", Asset.selected == True)
+        .order_by(Asset.rank)
+    ).all()
+    if not images:
+        raise HTTPException(status_code=400, detail="No selected images")
+
+    payload = json.dumps(
+        {"story_id": story_id, "image_urls": [img.remote_url for img in images]}
+    )
+
+    db_path = settings.BASE_DIR / "jobs.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cur = conn.execute(
+            "INSERT INTO jobs (kind, status, payload) VALUES ('render', 'queued', ?)",
+            (payload,),
+        )
+        job_id = cur.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"job_id": job_id}
 
 
 __all__ = ["router"]

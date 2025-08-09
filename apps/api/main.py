@@ -8,12 +8,14 @@ from fastapi import FastAPI
 
 from .db import init_db
 from .stories import router as stories_router
+from .jobs import router as jobs_router
 
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dark Life API")
 app.include_router(stories_router)
+app.include_router(jobs_router)
 
 
 @app.on_event("startup")
