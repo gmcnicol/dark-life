@@ -23,6 +23,7 @@ def ingestor_env(tmp_path, monkeypatch):
 
     from importlib import import_module
 
+    config_module = import_module("shared.config")
     monitoring = import_module("services.reddit_ingestor.monitoring")
     storage = import_module("services.reddit_ingestor.storage")
     backfill = import_module("services.reddit_ingestor.backfill")
@@ -30,6 +31,7 @@ def ingestor_env(tmp_path, monkeypatch):
     normalizer = import_module("services.reddit_ingestor.normalizer")
 
     # Reload modules that depend on DATABASE_URL or other env vars
+    reload(config_module)
     reload(storage)
     reload(backfill)
     reload(incremental)
@@ -54,6 +56,7 @@ def ingestor_env(tmp_path, monkeypatch):
                 upvotes INTEGER NOT NULL,
                 num_comments INTEGER NOT NULL,
                 hash_title_body TEXT NOT NULL,
+                image_urls TEXT,
                 UNIQUE(subreddit, hash_title_body)
             )
             """

@@ -27,7 +27,14 @@ from .monitoring import (
     REJECTED_POSTS,
 )
 from .normalizer import normalize_post
-from .storage import insert_post, record_rejection, run_with_session
+from .media import extract_image_urls
+from .events import push_new_story
+from .storage import (
+    insert_post,
+    is_fuzzy_duplicate,
+    record_rejection,
+    run_with_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +113,17 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[str
             created_dt = datetime.fromtimestamp(int(post.get("created_utc", 0)), tz=timezone.utc)
             fullname = post.get("name") or f"t3_{post.get('id')}"
             if normalized:
+                if is_fuzzy_duplicate(session, subreddit, normalized.title, normalized.body):
+                    duplicates += 1
+                    record_rejection(
+                        session,
+                        fullname,
+                        subreddit,
+                        "fuzzy_duplicate",
+                        post,
+                    )
+                    continue
+
                 payload = {
                     "reddit_id": fullname,
                     "subreddit": subreddit,
@@ -120,9 +138,11 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[str
                     "upvotes": int(post.get("ups") or post.get("score") or 0),
                     "num_comments": int(post.get("num_comments") or 0),
                     "hash_title_body": normalized.hash_title_body,
+                    "image_urls": extract_image_urls(post),
                 }
                 if insert_post(session, payload):
                     inserted += 1
+                    push_new_story(payload)
                     if newest_dt is None or created_dt > newest_dt:
                         newest_dt = created_dt
                         newest_fullname = fullname

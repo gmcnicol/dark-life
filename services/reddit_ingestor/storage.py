@@ -11,6 +11,7 @@ sessions and retry transient failures.
 import time
 import uuid
 from typing import Any, Callable, Dict, TypeVar
+from difflib import SequenceMatcher
 
 from sqlalchemy import (
     Boolean,
@@ -23,6 +24,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     func,
+    select,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, insert as pg_insert
 from sqlalchemy.exc import OperationalError
@@ -58,6 +60,7 @@ reddit_posts = Table(
     Column("upvotes", Integer, nullable=False),
     Column("num_comments", Integer, nullable=False),
     Column("hash_title_body", Text, nullable=False),
+    Column("image_urls", JSON),
 )
 
 reddit_rejections = Table(
@@ -125,6 +128,36 @@ def insert_post(session: Session, payload: Dict[str, Any]) -> bool:
     result = session.execute(stmt)
     return bool(result.rowcount)
 
+
+def is_fuzzy_duplicate(
+    session: Session,
+    subreddit: str,
+    title: str,
+    body: str,
+    *,
+    threshold: float = 0.9,
+) -> bool:
+    """Return ``True`` if similar post exists in another subreddit.
+
+    A simple in-memory comparison using :class:`difflib.SequenceMatcher` is
+    performed against all stored posts outside of ``subreddit``.  When the
+    similarity ratio meets or exceeds ``threshold`` the post is considered a
+    duplicate.
+    """
+
+    combined = f"{title} {body}".strip()
+    if not combined:
+        return False
+
+    stmt = select(reddit_posts.c.title, reddit_posts.c.selftext).where(
+        reddit_posts.c.subreddit != subreddit
+    )
+    for row in session.execute(stmt):
+        existing = f"{row.title} {row.selftext or ''}"
+        if SequenceMatcher(None, combined, existing).ratio() >= threshold:
+            return True
+    return False
+
 def record_rejection(
     session: Session,
     reddit_id: str,
@@ -144,4 +177,11 @@ def record_rejection(
     session.execute(stmt)
 
 
-__all__ = ["engine", "SessionLocal", "run_with_session", "insert_post", "record_rejection"]
+__all__ = [
+    "engine",
+    "SessionLocal",
+    "run_with_session",
+    "insert_post",
+    "record_rejection",
+    "is_fuzzy_duplicate",
+]
