@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     VIDEO_OUTPUT_DIR: Path = OUTPUT_DIR / "videos"
     MANIFEST_DIR: Path = OUTPUT_DIR / "manifest"
     RENDER_QUEUE_DIR: Path = BASE_DIR / "render_queue"
+    YOUTUBE_CLIENT_SECRETS_FILE: Path | None = Field(
+        default=None,
+        description="Path to OAuth client secrets JSON for YouTube uploads",
+    )
+    YOUTUBE_TOKEN_FILE: Path | None = Field(
+        default=None,
+        description="Path to stored YouTube OAuth token",
+    )
     DATABASE_URL: str = Field(
         default="postgresql://postgres:postgres@localhost:5432/darklife",
         description="Postgres connection string",

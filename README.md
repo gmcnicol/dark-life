@@ -36,6 +36,8 @@ Visit [`http://localhost:3000`](http://localhost:3000) for the web UI and [`http
 | `PIXABAY_API_KEY` | API key used for image search fallback |
 | `OPENAI_API_KEY` | API key used by renderer services for narration |
 | `ELEVENLABS_API_KEY` | API key for voice synthesis |
+| `YOUTUBE_CLIENT_SECRETS_FILE` | Path to OAuth client secrets JSON for YouTube uploads |
+| `YOUTUBE_TOKEN_FILE` | Path to stored OAuth token for YouTube |
 
 ### `apps/api/.env`
 
@@ -57,6 +59,8 @@ Visit [`http://localhost:3000`](http://localhost:3000) for the web UI and [`http
 ## Renderer and Uploader Integration
 
 Existing renderer and uploader services live in the `video_renderer/` and `video_uploader/` directories. The FastAPI backend creates render jobs that these services can consume. Ensure they share access to the same `.env` values and directories (`render_queue/` and `output/`) when running them alongside the stack.
+
+To enable YouTube uploads, obtain OAuth client credentials from Google Cloud, run an OAuth flow to generate a token, and place the resulting files at the paths referenced by `YOUTUBE_CLIENT_SECRETS_FILE` and `YOUTUBE_TOKEN_FILE`. The `upload-videos` CLI will use these files to upload rendered videos automatically.
 
 ## Development
 
