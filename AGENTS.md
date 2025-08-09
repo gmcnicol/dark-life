@@ -7,7 +7,7 @@ No optional features — just the minimal happy path.
 ---
 
 ## PHASE 0 — Verify Bring-up
-- [ ] `docker compose up --build` runs Postgres, Redis, FastAPI (:8000), Next.js (:3000).
+- [x] `docker compose up --build` runs Postgres, Redis, FastAPI (:8000), Next.js (:3000).
 - [ ] `.env` has DB, Redis, image API key, YouTube creds.
 - [ ] Renderer & uploader share the same `/output` volume.
 
