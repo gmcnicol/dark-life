@@ -18,6 +18,8 @@ from .models import (
     Asset,
     AssetRead,
     AssetUpdate,
+    StoryPart,
+    StoryPartRead,
     Story,
     StoryCreate,
     StoryRead,
@@ -214,6 +216,60 @@ def update_image(
     session.commit()
     session.refresh(asset)
     return asset
+
+
+@router.post("/{story_id}/split", response_model=list[StoryPartRead])
+def split_story(
+    story_id: int,
+    target_seconds: int = 60,
+    session: Session = Depends(get_session),
+) -> list[StoryPartRead]:
+    """Split a story body into timed parts and persist them."""
+    story = session.get(Story, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    if not story.body_md:
+        raise HTTPException(status_code=400, detail="Story body is empty")
+
+    words_per_part = int(target_seconds * (160 / 60))
+    sentences = re.split(r"(?<=[.!?])\s+", story.body_md.strip())
+
+    parts_text: list[str] = []
+    current: list[str] = []
+    word_count = 0
+    for sentence in sentences:
+        sent_words = len(sentence.split())
+        if current and word_count + sent_words > words_per_part:
+            parts_text.append(" ".join(current).strip())
+            current = []
+            word_count = 0
+        current.append(sentence)
+        word_count += sent_words
+    if current:
+        parts_text.append(" ".join(current).strip())
+
+    existing_parts = session.exec(
+        select(StoryPart).where(StoryPart.story_id == story_id)
+    ).all()
+    for part in existing_parts:
+        session.delete(part)
+
+    parts: list[StoryPart] = []
+    for idx, text in enumerate(parts_text, 1):
+        words = len(text.split())
+        est_seconds = int(round(words / (160 / 60)))
+        part = StoryPart(
+            story_id=story_id,
+            index=idx,
+            body_md=text,
+            est_seconds=est_seconds,
+        )
+        session.add(part)
+        parts.append(part)
+    session.commit()
+    for part in parts:
+        session.refresh(part)
+    return parts
 
 
 @router.post("/{story_id}/enqueue-render", status_code=status.HTTP_202_ACCEPTED)

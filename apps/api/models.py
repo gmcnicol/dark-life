@@ -55,6 +55,33 @@ class StoryUpdate(SQLModel):
     status: Optional[str] = None
 
 
+class StoryPart(SQLModel, table=True):
+    """Story part table model."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    story_id: int = Field(foreign_key="story.id")
+    index: int
+    body_md: str
+    est_seconds: int
+    created_at: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True), server_default=func.now())
+    )
+    updated_at: datetime | None = Field(
+        sa_column=Column(
+            DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        )
+    )
+
+
+class StoryPartRead(SQLModel):
+    """Representation of a story part returned by the API."""
+
+    id: int
+    index: int
+    body_md: str
+    est_seconds: int
+
+
 class Asset(SQLModel, table=True):
     """Generic asset associated with a story."""
 
@@ -97,6 +124,8 @@ __all__ = [
     "StoryCreate",
     "StoryRead",
     "StoryUpdate",
+    "StoryPart",
+    "StoryPartRead",
     "Asset",
     "AssetRead",
     "AssetUpdate",
