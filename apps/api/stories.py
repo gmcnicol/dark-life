@@ -27,11 +27,29 @@ from .models import (
 router = APIRouter(prefix="/stories", tags=["stories"])
 
 
+# Domain-specific keywords for image search
+KEYWORDS = [
+    "cabin",
+    "forest",
+    "fog",
+    "attic",
+    "window",
+    "shadow",
+    "alley",
+    "night",
+    "mist",
+    "abandoned",
+]
+KEYWORD_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in KEYWORDS) + r")\b", re.IGNORECASE)
+
+
 def _extract_keywords(story: Story) -> str:
-    """Return a simple space-separated keyword string from a story."""
-    text = f"{story.title} {story.body_md or ''}"
-    words = re.findall(r"[a-zA-Z]+", text.lower())
-    return " ".join(words[:5])
+    """Return matched domain keywords from a story title/body."""
+    text = f"{story.title} {story.body_md or ''}".lower()
+    matches = KEYWORD_RE.findall(text)
+    # remove duplicates while preserving order
+    keywords = list(dict.fromkeys(matches))
+    return " ".join(keywords)
 
 
 def _fetch_pexels(keywords: str) -> Iterable[dict[str, str]]:
