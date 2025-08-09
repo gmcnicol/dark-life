@@ -15,6 +15,10 @@ type Toast = { type: "success" | "error"; message: string };
 export default function StoriesPage() {
   const queryClient = useQueryClient();
   const [toast, setToast] = useState<Toast | null>(null);
+  const [status, setStatus] = useState("");
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(5);
 
   function showToast(toast: Toast) {
     setToast(toast);
@@ -22,8 +26,15 @@ export default function StoriesPage() {
   }
 
   const { data: stories, isLoading, error } = useQuery({
-    queryKey: ["stories"],
-    queryFn: () => apiFetch<Story[]>("/stories"),
+    queryKey: ["stories", { status, q, page, limit }],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      if (q) params.set("q", q);
+      params.set("page", String(page));
+      params.set("limit", String(limit));
+      return apiFetch<Story[]>(`/stories?${params.toString()}`);
+    },
   });
 
   const createMutation = useMutation({
@@ -71,6 +82,44 @@ export default function StoriesPage() {
           New Story
         </button>
       </div>
+      <div className="flex gap-2 items-center">
+        <input
+          className="border px-2 py-1 rounded"
+          placeholder="Search"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setPage(1);
+          }}
+        />
+        <select
+          className="border px-2 py-1 rounded"
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">All</option>
+          <option value="draft">Draft</option>
+          <option value="approved">Approved</option>
+          <option value="ready">Ready</option>
+          <option value="rendered">Rendered</option>
+          <option value="uploaded">Uploaded</option>
+        </select>
+        <select
+          className="border px-2 py-1 rounded"
+          value={limit}
+          onChange={(e) => {
+            setLimit(parseInt(e.target.value));
+            setPage(1);
+          }}
+        >
+          <option value={5}>5</option>
+          <option value={10}>10</option>
+          <option value={20}>20</option>
+        </select>
+      </div>
       {isLoading && <p>Loading...</p>}
       {error && <p className="text-red-500">Failed to load stories</p>}
       <ul className="space-y-2">
@@ -91,6 +140,22 @@ export default function StoriesPage() {
           </li>
         ))}
       </ul>
+      <div className="flex items-center gap-2">
+        <button
+          className="border px-2 py-1 rounded"
+          disabled={page === 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+        >
+          Prev
+        </button>
+        <span>Page {page}</span>
+        <button
+          className="border px-2 py-1 rounded"
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Next
+        </button>
+      </div>
     </div>
   );
 }

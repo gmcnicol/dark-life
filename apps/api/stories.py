@@ -10,7 +10,7 @@ import sqlite3
 from typing import Iterable
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlmodel import Session, select
 
 from .db import get_session
@@ -82,9 +82,21 @@ def _fetch_pixabay(keywords: str) -> Iterable[dict[str, str]]:
 
 
 @router.get("/", response_model=list[StoryRead])
-def list_stories(session: Session = Depends(get_session)) -> list[StoryRead]:
-    """Return all stories."""
-    return session.exec(select(Story)).all()
+def list_stories(
+    status: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+    limit: int = 50,
+    session: Session = Depends(get_session),
+) -> list[StoryRead]:
+    """Return stories filtered by status/query with pagination."""
+    query = select(Story)
+    if status:
+        query = query.where(Story.status == status)
+    if q:
+        query = query.where(Story.title.ilike(f"%{q}%"))
+    query = query.offset((page - 1) * limit).limit(limit)
+    return session.exec(query).all()
 
 
 @router.get("/{story_id}", response_model=StoryRead)
@@ -126,15 +138,15 @@ def update_story(
     return story
 
 
-@router.delete("/{story_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_story(story_id: int, session: Session = Depends(get_session)) -> None:
+@router.delete("/{story_id}")
+def delete_story(story_id: int, session: Session = Depends(get_session)) -> Response:
     """Delete a story."""
     story = session.get(Story, story_id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
     session.delete(story)
     session.commit()
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{story_id}/fetch-images", response_model=list[AssetRead])
