@@ -25,16 +25,17 @@ def upload(
     title: str,
     client_secrets_file: Optional[Path] = None,
     token_file: Optional[Path] = None,
-) -> None:
+) -> Optional[str]:
     """Upload ``video`` to YouTube with ``title``.
 
-    If credentials are missing or the google API client isn't installed,
-    the upload is skipped gracefully.
+    Returns the video ID on success or ``None`` if the upload was skipped or
+    failed. If credentials are missing or the google API client isn't
+    installed, the upload is skipped gracefully.
     """
 
     if build is None:
         print("google-api-python-client not installed; skipping upload")
-        return
+        return None
 
     creds = None
     if token_file and token_file.exists():
@@ -46,7 +47,7 @@ def upload(
     if not creds or not creds.valid:
         if not client_secrets_file or not client_secrets_file.exists() or InstalledAppFlow is None:
             print("YouTube credentials missing; skipping upload")
-            return
+            return None
         flow = InstalledAppFlow.from_client_secrets_file(
             str(client_secrets_file), SCOPES
         )
@@ -62,7 +63,10 @@ def upload(
             part="snippet,status", body=body, media_body=media
         )
         response = request.execute()
-        print(f"Uploaded to YouTube: https://youtu.be/{response['id']}")
+        video_id = response.get("id")
+        print(f"Uploaded to YouTube: https://youtu.be/{video_id}")
+        return video_id
     except Exception as exc:  # pragma: no cover - handled gracefully
         print(f"YouTube upload failed: {exc}")
+        return None
 

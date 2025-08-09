@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, JSON, Index, func
+from sqlalchemy import Column, DateTime, JSON, Index, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
 
@@ -145,6 +145,23 @@ class Job(SQLModel, table=True):
     )
 
 
+class Upload(SQLModel, table=True):
+    """Record of a story part uploaded to an external platform."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    story_id: int = Field(foreign_key="story.id")
+    part_index: int
+    platform: str
+    platform_video_id: str
+    uploaded_at: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True), server_default=func.now())
+    )
+
+    __table_args__ = (
+        UniqueConstraint("story_id", "part_index", "platform"),
+    )
+
+
 __all__ = [
     "Story",
     "StoryCreate",
@@ -156,5 +173,6 @@ __all__ = [
     "AssetRead",
     "AssetUpdate",
     "Job",
+    "Upload",
 ]
 
