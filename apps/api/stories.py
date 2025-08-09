@@ -5,8 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 import os
 import re
-import json
-import sqlite3
 from typing import Iterable
 
 import requests
@@ -24,10 +22,8 @@ from .models import (
     StoryCreate,
     StoryRead,
     StoryUpdate,
+    Job,
 )
-from shared.config import settings
-
-
 router = APIRouter(prefix="/stories", tags=["stories"])
 
 
@@ -272,9 +268,9 @@ def split_story(
     return parts
 
 
-@router.post("/{story_id}/enqueue-render", status_code=status.HTTP_202_ACCEPTED)
-def enqueue_render(story_id: int, session: Session = Depends(get_session)) -> dict[str, int]:
-    """Validate selected images and enqueue a render job."""
+@router.post("/{story_id}/enqueue-series", status_code=status.HTTP_202_ACCEPTED)
+def enqueue_series(story_id: int, session: Session = Depends(get_session)) -> dict[str, list[dict[str, int]]]:
+    """Enqueue render_part jobs for each part of the story."""
     story = session.get(Story, story_id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -287,35 +283,30 @@ def enqueue_render(story_id: int, session: Session = Depends(get_session)) -> di
     if not images:
         raise HTTPException(status_code=400, detail="No selected images")
 
-    payload = json.dumps(
-        {"story_id": story_id, "image_urls": [img.remote_url for img in images]}
-    )
+    parts = session.exec(select(StoryPart).where(StoryPart.story_id == story_id).order_by(StoryPart.index)).all()
+    if not parts:
+        parts = split_story(story_id, session=session)
 
-    db_path = settings.BASE_DIR / "jobs.db"
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                kind TEXT NOT NULL,
-                status TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """
+    asset_ids = [img.id for img in images]
+    jobs: list[Job] = []
+    for part in parts:
+        job = Job(
+            story_id=story_id,
+            kind="render_part",
+            status="queued",
+            payload={
+                "story_id": story_id,
+                "part_index": part.index,
+                "asset_ids": asset_ids,
+            },
         )
-        cur = conn.execute(
-            "INSERT INTO jobs (kind, status, payload) VALUES ('render', 'queued', ?)",
-            (payload,),
-        )
-        job_id = cur.lastrowid
-        conn.commit()
-    finally:
-        conn.close()
+        session.add(job)
+        jobs.append(job)
+    session.commit()
+    for job in jobs:
+        session.refresh(job)
 
-    return {"job_id": job_id}
+    return {"jobs": [{"id": job.id, "part_index": job.payload.get("part_index") if job.payload else None} for job in jobs]}
 
 
 __all__ = ["router"]

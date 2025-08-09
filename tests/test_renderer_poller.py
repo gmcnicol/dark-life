@@ -5,33 +5,55 @@ from pathlib import Path
 import sys
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, Session, create_engine
+
+from apps.api.models import Asset, Job
 from shared.config import settings
 from services.renderer import poller
 
 
-def test_poller_processes_job(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(settings, "BASE_DIR", tmp_path)
-    db_path = tmp_path / "jobs.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, status TEXT, payload TEXT, created_at TEXT, updated_at TEXT)"
-    )
-    payload = json.dumps({"story": 123})
-    conn.execute("INSERT INTO jobs (kind, status, payload) VALUES ('render', 'queued', ?)", (payload,))
-    conn.commit()
-    conn.close()
+def test_poller_processes_job(tmp_path, monkeypatch):
+    visuals = tmp_path / "visuals"
+    visuals.mkdir()
+    monkeypatch.setattr(settings, "VISUALS_DIR", visuals)
+    monkeypatch.setattr(settings, "STORIES_DIR", tmp_path)
 
-    conn = sqlite3.connect(db_path)
-    try:
-        processed = poller.process_once(conn)
-    finally:
-        conn.close()
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        asset = Asset(story_id=1, remote_url="http://example.com/img.jpg")
+        session.add(asset)
+        session.commit()
+        session.refresh(asset)
+        job = Job(
+            story_id=1,
+            kind="render_part",
+            status="queued",
+            payload={"story_id": 1, "part_index": 1, "asset_ids": [asset.id]},
+        )
+        session.add(job)
+        session.commit()
+        job_id = job.id
+
+    class DummyResponse:
+        content = b"img"
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(poller.requests, "get", lambda url, timeout: DummyResponse())
+    monkeypatch.setattr(poller.render_job_runner, "_process_job", lambda job: True)
+
+    with Session(engine) as session:
+        processed = poller.process_once(session)
 
     assert processed
-    out = capsys.readouterr().out.strip()
-    assert out == payload
-
-    conn = sqlite3.connect(db_path)
-    status = conn.execute("SELECT status FROM jobs WHERE id = 1").fetchone()[0]
-    conn.close()
-    assert status == "success"
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        assert job.status == "success"
