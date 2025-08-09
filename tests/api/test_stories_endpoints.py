@@ -123,3 +123,43 @@ def test_enqueue_series_creates_jobs(client: TestClient, monkeypatch: pytest.Mon
     jobs = jobs_res.json()
     assert len(jobs) == len(parts)
     assert all(job["status"] == "queued" for job in jobs)
+
+
+def test_list_images_returns_in_rank_order(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    """Test that GET /stories/{id}/images returns images in rank order."""
+    story = client.post(
+        "/stories", json={"title": "Test Story", "body_md": "forest cabin night"}
+    ).json()
+
+    # Mock image fetch to return multiple images
+    monkeypatch.setattr(
+        stories,
+        "_fetch_pexels",
+        lambda keywords: [
+            {"remote_url": "http://img/1.jpg", "provider": "pexels", "provider_id": "1"},
+            {"remote_url": "http://img/2.jpg", "provider": "pexels", "provider_id": "2"},
+            {"remote_url": "http://img/3.jpg", "provider": "pexels", "provider_id": "3"},
+        ],
+    )
+    monkeypatch.setattr(stories, "_fetch_pixabay", lambda keywords: [])
+
+    # Fetch images
+    res = client.post(f"/stories/{story['id']}/fetch-images")
+    assert res.status_code == 200
+    assets = res.json()
+    assert len(assets) == 3
+
+    # Set ranks in non-sequential order to test sorting
+    client.patch(f"/stories/{story['id']}/images/{assets[0]['id']}", json={"rank": 3})
+    client.patch(f"/stories/{story['id']}/images/{assets[1]['id']}", json={"rank": 1})
+    client.patch(f"/stories/{story['id']}/images/{assets[2]['id']}", json={"rank": 2})
+
+    # Get images and verify they are returned in rank order
+    images_res = client.get(f"/stories/{story['id']}/images")
+    assert images_res.status_code == 200
+    images = images_res.json()
+    assert len(images) == 3
+    
+    # Verify order by rank (and then by id for consistent ordering)
+    ranks = [img["rank"] for img in images if img["rank"] is not None]
+    assert ranks == [1, 2, 3]
