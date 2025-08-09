@@ -7,7 +7,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
-from dotenv import load_dotenv
+try:  # Optional dependency
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - dotenv not installed
+    def load_dotenv(*args, **kwargs):  # type: ignore
+        return None
+
 import requests
 import typer
 
