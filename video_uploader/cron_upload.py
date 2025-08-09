@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 
 from shared.config import settings
-from . import upload_to_instagram, upload_to_tiktok
+from . import upload_to_instagram, upload_to_tiktok, upload_youtube
 
 app = typer.Typer(add_completion=False)
 
@@ -24,6 +24,17 @@ def run(insta_user: str = "", insta_pass: str = "") -> None:
             upload_to_instagram.upload(video, caption, insta_user, insta_pass)
         else:
             print("Instagram credentials missing; skipping upload")
+
+        yt_secret = settings.YOUTUBE_CLIENT_SECRETS_FILE
+        yt_token = settings.YOUTUBE_TOKEN_FILE
+        if (
+            (yt_secret and yt_secret.exists())
+            or (yt_token and yt_token.exists())
+        ):
+            upload_youtube.upload(video, caption, yt_secret, yt_token)
+        else:
+            print("YouTube credentials missing; skipping upload")
+
         upload_to_tiktok.upload(video, caption)
         manifest.unlink()
 
