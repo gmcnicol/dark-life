@@ -16,7 +16,7 @@ No optional features — just the minimal happy path.
 ## PHASE 1 — Image Fetch & Selection (UI ↔ API)
 - [ ] Implement `POST /api/stories/{id}/fetch-images` → hits Pexels/Pixabay → stores candidates in `assets` table (selected=false, rank=null).
 - [ ] Implement `GET /api/stories/{id}/images` → returns candidates.
-- [ ] Implement `PATCH /api/stories/{id}/images/{assetId}` → toggle selected/rank.
+- [x] Implement `PATCH /api/stories/{id}/images/{assetId}` → toggle selected/rank.
 - [ ] Web UI “Images” tab:
     - Fetch images button.
     - Grid of thumbnails, selectable.
