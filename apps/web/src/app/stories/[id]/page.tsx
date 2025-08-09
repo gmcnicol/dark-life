@@ -18,6 +18,13 @@ interface Asset {
   selected: boolean;
 }
 
+interface StoryPart {
+  id: number;
+  index: number;
+  body_md: string;
+  est_seconds: number;
+}
+
 interface Job {
   id: string;
   status: string;
@@ -39,8 +46,9 @@ export default function StoryEditorPage({
   const [form, setForm] = useState<Story | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const isInitial = useRef(true);
-  const [tab, setTab] = useState<"content" | "images">("content");
+  const [tab, setTab] = useState<"content" | "images" | "parts">("content");
   const queryClient = useQueryClient();
+  const [parts, setParts] = useState<StoryPart[]>([]);
 
   const { data: images } = useQuery({
     queryKey: ["images", id],
@@ -103,6 +111,17 @@ export default function StoryEditorPage({
         link: "/jobs",
         linkText: "View jobs",
       }),
+    onError: (err: unknown) =>
+      showToast({ type: "error", message: (err as Error).message }),
+  });
+
+  const splitMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<StoryPart[]>(`/stories/${id}/split`, { method: "POST" }),
+    onSuccess: (data) => {
+      setParts(data);
+      setTab("parts");
+    },
     onError: (err: unknown) =>
       showToast({ type: "error", message: (err as Error).message }),
   });
@@ -194,16 +213,35 @@ export default function StoryEditorPage({
         >
           Images
         </button>
+        {parts.length > 0 && (
+          <button
+            className={`px-3 py-1 ${
+              tab === "parts" ? "border-b-2 border-white" : "text-gray-500"
+            }`}
+            onClick={() => setTab("parts")}
+          >
+            Parts
+          </button>
+        )}
       </div>
-      <button
-        className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50"
-        disabled={
-          form.status !== "approved" || selectedCount === 0 || enqueueMutation.isLoading
-        }
-        onClick={() => enqueueMutation.mutate()}
-      >
-        Queue for render
-      </button>
+      <div className="space-x-2">
+        <button
+          className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50"
+          onClick={() => splitMutation.mutate()}
+          disabled={splitMutation.isLoading}
+        >
+          Split into parts
+        </button>
+        <button
+          className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50"
+          disabled={
+            form.status !== "approved" || selectedCount === 0 || enqueueMutation.isLoading
+          }
+          onClick={() => enqueueMutation.mutate()}
+        >
+          Queue for render
+        </button>
+      </div>
       {tab === "content" && (
         <>
           <input
@@ -239,6 +277,18 @@ export default function StoryEditorPage({
         </>
       )}
       {tab === "images" && <ImagesTab storyId={id} />}
+      {tab === "parts" && (
+        <div className="space-y-4">
+          {parts.map((p) => (
+            <div key={p.id} className="border border-neutral-700 p-2 rounded">
+              <div className="font-semibold">Part {p.index}</div>
+              <div className="text-sm text-neutral-300">
+                {p.body_md.slice(0, 100)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
