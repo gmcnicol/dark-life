@@ -71,6 +71,39 @@ def test_fetch_images_creates_assets(client: TestClient, monkeypatch: pytest.Mon
     assert urls == {"http://img/1.jpg", "http://img/2.jpg"}
 
 
+def test_get_images_returns_rank_order(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    story = client.post("/stories", json={"title": "Ranked"}).json()
+
+    monkeypatch.setattr(
+        stories,
+        "_fetch_pexels",
+        lambda keywords: [
+            {"remote_url": "http://img/1.jpg", "provider": "pexels", "provider_id": "1"},
+            {"remote_url": "http://img/2.jpg", "provider": "pexels", "provider_id": "2"},
+        ],
+    )
+    monkeypatch.setattr(stories, "_fetch_pixabay", lambda keywords: [])
+
+    res = client.post(f"/stories/{story['id']}/fetch-images")
+    assert res.status_code == 200
+    assets = res.json()
+
+    # swap ranks
+    res = client.patch(
+        f"/stories/{story['id']}/images/{assets[0]['id']}", json={"rank": 1}
+    )
+    assert res.status_code == 200
+    res = client.patch(
+        f"/stories/{story['id']}/images/{assets[1]['id']}", json={"rank": 0}
+    )
+    assert res.status_code == 200
+
+    res = client.get(f"/stories/{story['id']}/images")
+    assert res.status_code == 200
+    ids = [a["id"] for a in res.json()]
+    assert ids == [assets[1]["id"], assets[0]["id"]]
+
+
 def test_split_endpoint_creates_parts(client: TestClient):
     body = " ".join([f"Sentence {i}." for i in range(20)])
     story = client.post(

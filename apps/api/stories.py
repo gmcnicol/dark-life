@@ -201,14 +201,14 @@ def fetch_images(story_id: int, session: Session = Depends(get_session)) -> list
 
 @router.get("/{story_id}/images", response_model=list[AssetRead])
 def list_images(story_id: int, session: Session = Depends(get_session)) -> list[AssetRead]:
-    """List images associated with a story."""
+    """Return image assets for a story ordered by rank."""
     story = session.get(Story, story_id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
     return session.exec(
         select(Asset)
         .where(Asset.story_id == story_id, Asset.type == "image")
-        .order_by(Asset.rank)
+        .order_by(Asset.rank, Asset.id)
     ).all()
 
 
