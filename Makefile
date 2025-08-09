@@ -1,4 +1,4 @@
-.PHONY: init sync test run-webapp run-renderer run-uploader
+.PHONY: init sync test run-webapp renderer uploader run-renderer run-uploader up down smoke
 
 VENV_DIR := .venv
 
@@ -17,11 +17,24 @@ sync:
 run-webapp:
 	uv run python -m webapp.main run
 
-run-renderer:
+renderer:
 	uv run python -m video_renderer.render_job_runner run
 
-run-uploader:
+uploader:
 	uv run python -m video_uploader.cron_upload run
+
+run-renderer: renderer
+
+run-uploader: uploader
+
+up:
+	docker compose -f infra/docker-compose.yml up
+
+down:
+	docker compose -f infra/docker-compose.yml down
+
+smoke:
+	uv run python scripts/smoke_e2e.py
 
 test:
 	uv run --with pytest pytest -q
