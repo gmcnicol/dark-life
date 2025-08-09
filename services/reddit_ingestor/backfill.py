@@ -16,6 +16,7 @@ reached.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
+import time
 import uuid
 from typing import List, Optional, Tuple
 
@@ -23,6 +24,12 @@ from sqlalchemy import Column, DateTime, MetaData, Table, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, insert as pg_insert
 
 from .client import RedditClient
+from .monitoring import (
+    DUPLICATE_POSTS,
+    INSERTED_POSTS,
+    PROCESSING_LATENCY,
+    REJECTED_POSTS,
+)
 from .normalizer import normalize_post
 from .storage import insert_post, record_rejection, run_with_session
 
@@ -70,8 +77,13 @@ def _update_fetch_state(session, subreddit: str, earliest: datetime) -> None:
 def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[datetime]]:
     """Normalize and store posts returning count and earliest timestamp."""
 
+    fetched = len(posts)
+    start = time.time()
+
     def op(session):
         inserted = 0
+        duplicates = 0
+        rejected = 0
         earliest_dt: Optional[datetime] = None
         for post in posts:
             normalized, reason = normalize_post(post)
@@ -96,7 +108,10 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[dat
                     inserted += 1
                     if earliest_dt is None or created_dt < earliest_dt:
                         earliest_dt = created_dt
+                else:
+                    duplicates += 1
             else:
+                rejected += 1
                 # Record why the post was rejected for auditing
                 record_rejection(
                     session,
@@ -107,9 +122,26 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[dat
                 )
         if inserted and earliest_dt:
             _update_fetch_state(session, subreddit, earliest_dt)
-        return inserted, earliest_dt
+        return inserted, duplicates, rejected, earliest_dt
 
-    return run_with_session(op)
+    inserted, duplicates, rejected, earliest_dt = run_with_session(op)
+    duration = time.time() - start
+    logger.info(
+        "process_posts",
+        extra={
+            "subreddit": subreddit,
+            "fetched": fetched,
+            "inserted": inserted,
+            "duplicates": duplicates,
+            "rejected": rejected,
+            "duration": duration,
+        },
+    )
+    PROCESSING_LATENCY.labels(subreddit=subreddit).observe(duration)
+    INSERTED_POSTS.labels(subreddit=subreddit).inc(inserted)
+    DUPLICATE_POSTS.labels(subreddit=subreddit).inc(duplicates)
+    REJECTED_POSTS.labels(subreddit=subreddit).inc(rejected)
+    return inserted, earliest_dt
 
 
 # ---------------------------------------------------------------------------

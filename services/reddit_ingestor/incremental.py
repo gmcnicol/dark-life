@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import time
 import uuid
 from typing import List, Optional, Tuple
 
@@ -19,6 +20,12 @@ from sqlalchemy import Column, DateTime, MetaData, Table, Text, func, select
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, insert as pg_insert
 
 from .client import RedditClient
+from .monitoring import (
+    DUPLICATE_POSTS,
+    INSERTED_POSTS,
+    PROCESSING_LATENCY,
+    REJECTED_POSTS,
+)
 from .normalizer import normalize_post
 from .storage import insert_post, record_rejection, run_with_session
 
@@ -85,8 +92,13 @@ def _update_fetch_state(session, subreddit: str, fullname: str, created: datetim
 def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[str], Optional[datetime]]:
     """Normalize and store posts returning count and newest post info."""
 
+    fetched = len(posts)
+    start = time.time()
+
     def op(session):
         inserted = 0
+        duplicates = 0
+        rejected = 0
         newest_fullname: Optional[str] = None
         newest_dt: Optional[datetime] = None
         for post in posts:
@@ -114,7 +126,10 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[str
                     if newest_dt is None or created_dt > newest_dt:
                         newest_dt = created_dt
                         newest_fullname = fullname
+                else:
+                    duplicates += 1
             else:
+                rejected += 1
                 record_rejection(
                     session,
                     fullname,
@@ -124,9 +139,26 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[str
                 )
         if inserted and newest_fullname and newest_dt:
             _update_fetch_state(session, subreddit, newest_fullname, newest_dt)
-        return inserted, newest_fullname, newest_dt
+        return inserted, duplicates, rejected, newest_fullname, newest_dt
 
-    return run_with_session(op)
+    inserted, duplicates, rejected, newest_fullname, newest_dt = run_with_session(op)
+    duration = time.time() - start
+    logger.info(
+        "process_posts",
+        extra={
+            "subreddit": subreddit,
+            "fetched": fetched,
+            "inserted": inserted,
+            "duplicates": duplicates,
+            "rejected": rejected,
+            "duration": duration,
+        },
+    )
+    PROCESSING_LATENCY.labels(subreddit=subreddit).observe(duration)
+    INSERTED_POSTS.labels(subreddit=subreddit).inc(inserted)
+    DUPLICATE_POSTS.labels(subreddit=subreddit).inc(duplicates)
+    REJECTED_POSTS.labels(subreddit=subreddit).inc(rejected)
+    return inserted, newest_fullname, newest_dt
 
 
 # ---------------------------------------------------------------------------

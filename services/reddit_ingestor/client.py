@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from .monitoring import API_LATENCY, FETCHED_POSTS, INGESTION_ERRORS
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,12 +68,20 @@ class RedditClient:
         backoff = 1.0
         while True:
             self._rate_limiter.wait()
+            start = time.time()
             try:
                 resp = self._session.get(url, params=params, timeout=10)
                 resp.raise_for_status()
+                API_LATENCY.labels(endpoint=url).observe(time.time() - start)
                 return resp.json()
             except requests.RequestException as exc:  # pragma: no cover - network failure
-                logger.warning("Reddit API request failed: %s; retrying in %.1f s", exc, backoff)
+                API_LATENCY.labels(endpoint=url).observe(time.time() - start)
+                INGESTION_ERRORS.labels(component="client_request").inc()
+                logger.warning(
+                    "Reddit API request failed: %s; retrying in %.1f s",
+                    exc,
+                    backoff,
+                )
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 64)  # exponential backoff with cap
 
@@ -108,6 +118,11 @@ class RedditClient:
         data = self._request(url, params)
         children = data.get("data", {}).get("children", [])
         posts = [child.get("data", {}) for child in children]
+        FETCHED_POSTS.labels(subreddit=subreddit).inc(len(posts))
+        logger.info(
+            "fetched_posts",
+            extra={"subreddit": subreddit, "fetched": len(posts)},
+        )
         next_after = data.get("data", {}).get("after")
         return posts, next_after
 
@@ -140,6 +155,11 @@ class RedditClient:
         data = self._request(url, params)
         children = data.get("data", {}).get("children", [])
         posts = [child.get("data", {}) for child in children]
+        FETCHED_POSTS.labels(subreddit=subreddit).inc(len(posts))
+        logger.info(
+            "fetched_posts",
+            extra={"subreddit": subreddit, "fetched": len(posts)},
+        )
         next_after = data.get("data", {}).get("after")
         return posts, next_after
 
