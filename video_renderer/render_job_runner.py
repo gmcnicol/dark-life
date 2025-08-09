@@ -41,7 +41,7 @@ def _process_job(job: RenderJob) -> bool:
     try:
         whisper_subs.main(
             input_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
-            stories_dir=settings.STORIES_DIR,
+            output_dir=settings.CONTENT_DIR / "subtitles",
         )
     except Exception:
         logger.exception("Subtitle creation failed for %s", story_id)
@@ -49,7 +49,14 @@ def _process_job(job: RenderJob) -> bool:
 
     # Create video slideshow
     try:
-        create_slideshow.main(["--story_id", story_id])
+        create_slideshow.main(
+            [
+                "--story_id",
+                story_id,
+                "--subtitles-dir",
+                str(settings.CONTENT_DIR / "subtitles"),
+            ]
+        )
     except Exception:
         logger.exception("Slideshow rendering failed for %s", story_id)
         return False
