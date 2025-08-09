@@ -180,16 +180,19 @@ def fetch_images(story_id: int, session: Session = Depends(get_session)) -> list
             select(Asset).where(Asset.story_id == story_id, Asset.type == "image")
         ).all()
     }
-    for idx, data in enumerate(assets_data):
-        if not data.get("remote_url") or data["remote_url"] in existing_urls:
+    for data in assets_data:
+        url = data.get("remote_url")
+        if not url or url in existing_urls:
             continue
+        existing_urls.add(url)
         asset = Asset(
             story_id=story_id,
             type="image",
-            remote_url=data["remote_url"],
+            remote_url=url,
             provider=data.get("provider"),
             provider_id=data.get("provider_id"),
-            rank=idx,
+            selected=False,
+            rank=None,
         )
         session.add(asset)
         assets.append(asset)
