@@ -72,5 +72,18 @@ This project uses [uv](https://github.com/astral-sh/uv) for Python dependency ma
 ```bash
 make init    # set up the Python virtual environment
 make test    # run the test suite
+make smoke   # run the end-to-end smoke test
 ```
+
+## Smoke test
+
+After the stack and renderer worker are running, execute:
+
+```bash
+make smoke
+```
+
+This script creates a sample story, fetches images, splits the story,
+enqueues render jobs, waits for them to finish, verifies the output files, and
+can optionally perform an uploader dry-run with `--uploader`.
 
