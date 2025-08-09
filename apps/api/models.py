@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, func
+from sqlalchemy import Column, DateTime, JSON, Index, func
 from sqlmodel import Field, SQLModel
 
 
@@ -119,6 +119,32 @@ class AssetUpdate(SQLModel):
     rank: Optional[int] = None
 
 
+class Job(SQLModel, table=True):
+    """Background job table model."""
+
+    __tablename__ = "jobs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    story_id: int | None = Field(default=None, foreign_key="story.id")
+    kind: str
+    status: str
+    payload: dict | None = Field(default=None, sa_column=Column(JSON))
+    result: dict | None = Field(default=None, sa_column=Column(JSON))
+    created_at: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True), server_default=func.now())
+    )
+    updated_at: datetime | None = Field(
+        sa_column=Column(
+            DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        )
+    )
+
+    __table_args__ = (
+        Index("ix_jobs_status_kind", "status", "kind"),
+        Index("ix_jobs_story_id", "story_id"),
+    )
+
+
 __all__ = [
     "Story",
     "StoryCreate",
@@ -129,5 +155,6 @@ __all__ = [
     "Asset",
     "AssetRead",
     "AssetUpdate",
+    "Job",
 ]
 

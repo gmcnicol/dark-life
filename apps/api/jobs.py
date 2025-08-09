@@ -2,51 +2,41 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
-from typing import List, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
 
-from fastapi import APIRouter
-
-from shared.config import settings
+from .db import get_session
+from .models import Job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL,
-    status TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
+
+@router.get("/", response_model=list[Job])
+def list_jobs(
+    story_id: int | None = None,
+    kind: str | None = None,
+    status: str | None = None,
+    session: Session = Depends(get_session),
+) -> list[Job]:
+    """Return jobs filtered by optional criteria."""
+    query = select(Job)
+    if story_id is not None:
+        query = query.where(Job.story_id == story_id)
+    if kind:
+        query = query.where(Job.kind == kind)
+    if status:
+        query = query.where(Job.status == status)
+    query = query.order_by(Job.id.desc())
+    return session.exec(query).all()
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(settings.BASE_DIR / "jobs.db")
-    conn.row_factory = sqlite3.Row
-    conn.execute(SCHEMA)
-    return conn
-
-
-@router.get("/", response_model=List[Dict[str, Any]])
-def list_jobs() -> List[Dict[str, Any]]:
-    """Return all jobs in the queue."""
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT id, kind, status, payload, created_at, updated_at FROM jobs ORDER BY id DESC"
-        ).fetchall()
-    jobs: List[Dict[str, Any]] = []
-    for row in rows:
-        job = dict(row)
-        try:
-            job["payload"] = json.loads(job["payload"])
-        except Exception:
-            pass
-        jobs.append(job)
-    return jobs
+@router.get("/{job_id}", response_model=Job)
+def get_job(job_id: int, session: Session = Depends(get_session)) -> Job:
+    """Return a job by ID."""
+    job = session.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 __all__ = ["router"]
