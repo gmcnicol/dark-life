@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:  # Optional dependency
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - dotenv not installed
+    def load_dotenv(*args, **kwargs):  # type: ignore
+        return None
 from pydantic import Field
 from pydantic_settings import BaseSettings
 

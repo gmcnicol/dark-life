@@ -1,10 +1,9 @@
 """Generate subtitles from narration audio using faster-whisper.
 
-This module replaces the previous placeholder implementation that simply split
-story text into evenly timed subtitle segments.  Instead we now transcribe the
-actual narration MP3s with the `faster-whisper` library and emit standard SRT
-files.  The main entry point scans a directory of voiceover MP3 files and
-writes the matching ``.srt`` files to an output directory.
+This module scans a directory of voiceover MP3 files and writes matching
+``.srt`` files to an output directory.  The real ``faster-whisper`` library is
+used when available but the import is optional so tests can provide a dummy
+``WhisperModel`` without requiring the heavy dependency.
 """
 
 from __future__ import annotations
@@ -12,10 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-import typer
-from faster_whisper import WhisperModel
-
-app = typer.Typer(add_completion=False)
+try:  # Optional dependency; tests monkeypatch ``WhisperModel``
+    from faster_whisper import WhisperModel  # type: ignore
+except Exception:  # pragma: no cover - faster-whisper not installed
+    WhisperModel = None  # type: ignore
 
 
 def _format_srt_time(seconds: float) -> str:
@@ -37,21 +36,20 @@ def _write_srt(segments: Iterable, dest: Path) -> None:
         start = _format_srt_time(seg.start)
         end = _format_srt_time(seg.end)
         text = seg.text.strip()
-        lines.append(f"{idx}\n{start} --> {end}\n{text}\n")
-    dest.write_text("\n".join(lines), encoding="utf-8")
+        lines.append(f"{idx}\n{start} --> {end}\n{text}")
+
+    dest.write_text("\n\n".join(lines) + "\n", encoding="utf-8")
 
 
-@app.command()
 def main(
-    input_dir: Path = typer.Option(
-        Path("content/audio/voiceovers"), help="Directory containing narration MP3s"
-    ),
-    output_dir: Path = typer.Option(
-        Path("content/subtitles"), help="Where to write generated subtitle files"
-    ),
-    model_size: str = typer.Option("tiny", help="Whisper model size"),
+    input_dir: Path = Path("content/audio/voiceovers"),
+    output_dir: Path = Path("content/subtitles"),
+    model_size: str = "tiny",
 ) -> None:
     """Transcribe all narration MP3s in ``input_dir`` to SRT files."""
+
+    if WhisperModel is None:  # pragma: no cover - real model missing
+        raise RuntimeError("faster-whisper is required to generate subtitles")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     model = WhisperModel(model_size, device="cpu")
@@ -66,5 +64,10 @@ def main(
 
 
 if __name__ == "__main__":  # pragma: no cover
-    app()
+    try:
+        import typer
+
+        typer.run(main)
+    except Exception as exc:  # pragma: no cover - CLI path
+        raise SystemExit(str(exc))
 
