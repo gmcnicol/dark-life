@@ -25,7 +25,7 @@ No optional features — just the minimal happy path.
 ---
 
 ## PHASE 2 — Split Story into Parts (~60s each)
-- [ ] Implement `POST /api/stories/{id}/split?target_seconds=60`:
+- [x] Implement `POST /api/stories/{id}/split?target_seconds=60`:
     - Estimate words per 60s.
     - Split on sentence boundaries.
     - Store in `story_parts` table.

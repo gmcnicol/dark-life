@@ -24,6 +24,7 @@ from .models import (
     StoryUpdate,
     Job,
 )
+
 router = APIRouter(prefix="/stories", tags=["stories"])
 
 
@@ -40,7 +41,12 @@ KEYWORDS = [
     "mist",
     "abandoned",
 ]
-KEYWORD_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in KEYWORDS) + r")\b", re.IGNORECASE)
+KEYWORD_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in KEYWORDS) + r")\b", re.IGNORECASE
+)
+
+WORDS_PER_MINUTE = 160
+WORDS_PER_SECOND = WORDS_PER_MINUTE / 60
 
 
 def _extract_keywords(story: Story) -> str:
@@ -82,7 +88,12 @@ def _fetch_pixabay(keywords: str) -> Iterable[dict[str, str]]:
     try:
         res = requests.get(
             "https://pixabay.com/api/",
-            params={"key": api_key, "q": keywords, "image_type": "photo", "per_page": 8},
+            params={
+                "key": api_key,
+                "q": keywords,
+                "image_type": "photo",
+                "per_page": 8,
+            },
             timeout=10,
         )
         res.raise_for_status()
@@ -166,7 +177,9 @@ def delete_story(story_id: int, session: Session = Depends(get_session)) -> Resp
 
 
 @router.post("/{story_id}/fetch-images", response_model=list[AssetRead])
-def fetch_images(story_id: int, session: Session = Depends(get_session)) -> list[AssetRead]:
+def fetch_images(
+    story_id: int, session: Session = Depends(get_session)
+) -> list[AssetRead]:
     """Fetch images for a story using external providers."""
     story = session.get(Story, story_id)
     if not story:
@@ -203,7 +216,9 @@ def fetch_images(story_id: int, session: Session = Depends(get_session)) -> list
 
 
 @router.get("/{story_id}/images", response_model=list[AssetRead])
-def list_images(story_id: int, session: Session = Depends(get_session)) -> list[AssetRead]:
+def list_images(
+    story_id: int, session: Session = Depends(get_session)
+) -> list[AssetRead]:
     """Return image assets for a story ordered by rank, unranked last."""
     story = session.get(Story, story_id)
     if not story:
@@ -248,7 +263,7 @@ def split_story(
     if not story.body_md:
         raise HTTPException(status_code=400, detail="Story body is empty")
 
-    words_per_part = int(target_seconds * (160 / 60))
+    words_per_part = int(target_seconds * WORDS_PER_SECOND)
     sentences = re.split(r"(?<=[.!?])\s+", story.body_md.strip())
 
     parts_text: list[str] = []
@@ -274,7 +289,7 @@ def split_story(
     parts: list[StoryPart] = []
     for idx, text in enumerate(parts_text, 1):
         words = len(text.split())
-        est_seconds = int(round(words / (160 / 60)))
+        est_seconds = int(round(words / WORDS_PER_SECOND))
         part = StoryPart(
             story_id=story_id,
             index=idx,
@@ -290,7 +305,9 @@ def split_story(
 
 
 @router.post("/{story_id}/enqueue-series", status_code=status.HTTP_202_ACCEPTED)
-def enqueue_series(story_id: int, session: Session = Depends(get_session)) -> dict[str, list[dict[str, int]]]:
+def enqueue_series(
+    story_id: int, session: Session = Depends(get_session)
+) -> dict[str, list[dict[str, int]]]:
     """Enqueue render_part jobs for each part of the story."""
     story = session.get(Story, story_id)
     if not story:
@@ -298,13 +315,19 @@ def enqueue_series(story_id: int, session: Session = Depends(get_session)) -> di
 
     images = session.exec(
         select(Asset)
-        .where(Asset.story_id == story_id, Asset.type == "image", Asset.selected == True)
+        .where(
+            Asset.story_id == story_id, Asset.type == "image", Asset.selected == True
+        )
         .order_by(Asset.rank)
     ).all()
     if not images:
         raise HTTPException(status_code=400, detail="No selected images")
 
-    parts = session.exec(select(StoryPart).where(StoryPart.story_id == story_id).order_by(StoryPart.index)).all()
+    parts = session.exec(
+        select(StoryPart)
+        .where(StoryPart.story_id == story_id)
+        .order_by(StoryPart.index)
+    ).all()
     if not parts:
         parts = split_story(story_id, session=session)
 
@@ -327,8 +350,15 @@ def enqueue_series(story_id: int, session: Session = Depends(get_session)) -> di
     for job in jobs:
         session.refresh(job)
 
-    return {"jobs": [{"id": job.id, "part_index": job.payload.get("part_index") if job.payload else None} for job in jobs]}
+    return {
+        "jobs": [
+            {
+                "id": job.id,
+                "part_index": job.payload.get("part_index") if job.payload else None,
+            }
+            for job in jobs
+        ]
+    }
 
 
 __all__ = ["router"]
-
