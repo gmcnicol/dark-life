@@ -52,7 +52,7 @@ export default function StoryEditorPage({
 
   const { data: images } = useQuery({
     queryKey: ["images", id],
-    queryFn: () => apiFetch<Asset[]>(`/stories/${id}/images`),
+    queryFn: () => apiFetch<Asset[]>(`/api/stories/${id}/images`),
   });
 
   const selectedCount = images?.filter((img) => img.selected).length ?? 0;
@@ -64,7 +64,7 @@ export default function StoryEditorPage({
 
   const { data, isLoading } = useQuery({
     queryKey: ["story", id],
-    queryFn: () => apiFetch<Story>(`/stories/${id}`),
+    queryFn: () => apiFetch<Story>(`/api/stories/${id}`),
   });
 
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function StoryEditorPage({
 
   const mutation = useMutation({
     mutationFn: (patch: Partial<Story>) =>
-      apiFetch<Story>(`/stories/${id}`, {
+      apiFetch<Story>(`/api/stories/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -103,7 +103,7 @@ export default function StoryEditorPage({
 
   const enqueueMutation = useMutation({
     mutationFn: () =>
-      apiFetch<Job>(`/stories/${id}/enqueue-render`, { method: "POST" }),
+      apiFetch<Job>(`/api/stories/${id}/enqueue-render`, { method: "POST" }),
     onSuccess: (job) =>
       showToast({
         type: "success",
@@ -117,9 +117,9 @@ export default function StoryEditorPage({
 
   const splitMutation = useMutation({
     mutationFn: () =>
-      apiFetch<StoryPart[]>(`/stories/${id}/split`, { method: "POST" }),
+      apiFetch<StoryPart[]>(`/api/stories/${id}/split`, { method: "POST" }),
     onSuccess: (data) => {
-      setParts(data);
+      setParts([...data].sort((a, b) => a.index - b.index));
       setTab("parts");
     },
     onError: (err: unknown) =>
