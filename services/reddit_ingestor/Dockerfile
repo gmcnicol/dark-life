@@ -13,6 +13,7 @@ ENV REDDIT_CLIENT_ID= \
     REDDIT_USER_AGENT=darklife/1.0 \
     REDDIT_DEFAULT_SUBREDDITS=
 
-CMD ["python", "services/reddit_ingestor/cli.py", "incremental", "--subreddits", "$REDDIT_DEFAULT_SUBREDDITS"]
+ENTRYPOINT ["python", "services/reddit_ingestor/cli.py"]
+CMD ["incremental"]
 
 HEALTHCHECK CMD python -c "exit(0)"
