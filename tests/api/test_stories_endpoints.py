@@ -70,6 +70,7 @@ def test_fetch_images_creates_assets(client: TestClient, monkeypatch: pytest.Mon
     urls = {a["remote_url"] for a in assets}
     assert urls == {"http://img/1.jpg", "http://img/2.jpg"}
     assert all(a["selected"] is False and a["rank"] is None for a in assets)
+    assert all(a["selected"] is False and a["rank"] is None for a in assets)
 
 def test_get_images_unranked_last(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     story = client.post("/stories", json={"title": "Ranked"}).json()
@@ -184,7 +185,7 @@ def test_list_images_returns_in_rank_order(client: TestClient, monkeypatch: pyte
     assert images_res.status_code == 200
     images = images_res.json()
     assert len(images) == 3
-    
+
     # Verify order by rank (and then by id for consistent ordering)
     ranks = [img["rank"] for img in images if img["rank"] is not None]
     assert ranks == [1, 2, 3]

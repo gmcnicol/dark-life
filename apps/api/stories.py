@@ -211,7 +211,7 @@ def list_images(story_id: int, session: Session = Depends(get_session)) -> list[
     return session.exec(
         select(Asset)
         .where(Asset.story_id == story_id, Asset.type == "image")
-        .order_by(Asset.rank.is_(None), Asset.rank, Asset.id)
+        .order_by(Asset.rank, Asset.id)
     ).all()
 
 
