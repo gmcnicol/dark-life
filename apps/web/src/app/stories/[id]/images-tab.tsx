@@ -16,7 +16,7 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["images", storyId],
-    queryFn: () => apiFetch<Asset[]>(`/stories/${storyId}/images`),
+    queryFn: () => apiFetch<Asset[]>(`/api/stories/${storyId}/images`),
   });
 
   const [images, setImages] = useState<Asset[]>([]);
@@ -26,13 +26,13 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
 
   const fetchMutation = useMutation({
     mutationFn: () =>
-      apiFetch(`/stories/${storyId}/fetch-images`, { method: "POST" }),
+      apiFetch(`/api/stories/${storyId}/fetch-images`, { method: "POST" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["images", storyId] }),
   });
 
   const patchMutation = useMutation({
     mutationFn: ({ id, patch }: { id: number; patch: Partial<Asset> }) =>
-      apiFetch(`/stories/${storyId}/images/${id}`, {
+      apiFetch(`/api/stories/${storyId}/images/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),

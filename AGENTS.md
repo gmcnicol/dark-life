@@ -17,7 +17,7 @@ No optional features — just the minimal happy path.
 - [x] Implement `POST /api/stories/{id}/fetch-images` → hits Pexels/Pixabay → stores candidates in `assets` table (selected=false, rank=null).
 - [x] Implement `GET /api/stories/{id}/images` → returns candidates.
 - [x] Implement `PATCH /api/stories/{id}/images/{assetId}` → toggle selected/rank.
-- [ ] Web UI “Images” tab:
+- [x] Web UI “Images” tab:
     - Fetch images button.
     - Grid of thumbnails, selectable.
     - Drag-sort to set rank.
