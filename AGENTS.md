@@ -72,7 +72,7 @@ No optional features — just the minimal happy path.
     4. Enqueue series.
     5. Poll jobs until all parts rendered.
     6. Run uploader (dry-run OK).
-- [ ] Make target: `make smoke`.
+- [x] Make target: `make smoke`.
 
 ---
 

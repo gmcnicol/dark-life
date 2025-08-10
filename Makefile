@@ -34,7 +34,7 @@ down:
 	docker compose -f infra/docker-compose.yml down
 
 smoke:
-	uv run python scripts/smoke_e2e.py
+	python scripts/smoke_e2e.py
 
 test:
 	uv run --with pytest,httpx pytest -q
