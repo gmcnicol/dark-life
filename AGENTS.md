@@ -29,7 +29,7 @@ No optional features — just the minimal happy path.
     - Estimate words per 60s.
     - Split on sentence boundaries.
     - Store in `story_parts` table.
-- [ ] Web UI “Parts” tab lists all parts after split.
+- [x] Web UI “Parts” tab lists all parts after split.
 
 ---
 
