@@ -82,9 +82,12 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
     const updated = [...images];
     const [moved] = updated.splice(from, 1);
     updated.splice(index, 0, moved);
-    setImages(updated);
-    updated.forEach((img, i) => {
-      patchMutation.mutate({ id: img.id, patch: { rank: i } });
+    const withRank = updated.map((img, i) => ({ ...img, rank: i }));
+    setImages(withRank);
+    withRank.forEach((img, i) => {
+      if (images[i]?.id !== img.id) {
+        patchMutation.mutate({ id: img.id, patch: { rank: i } });
+      }
     });
   }
 
