@@ -34,7 +34,7 @@ No optional features — just the minimal happy path.
 ---
 
 ## PHASE 3 — Enqueue Series & Render
-- [ ] Implement `POST /api/stories/{id}/enqueue-series`:
+- [x] Implement `POST /api/stories/{id}/enqueue-series`:
     - Preconditions: ≥1 selected image.
     - If no parts, auto-run split.
     - For each part, create a `render_part` job with:
