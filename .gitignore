@@ -213,6 +213,9 @@ content/visuals/
 content/stories/
 !content/stories/.gitkeep
 
+secrets/
+!secrets/.gitkeep
+
 output/videos/*
 !output/videos/.gitkeep
 output/manifest/*
