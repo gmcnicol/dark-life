@@ -106,6 +106,12 @@ Existing renderer and uploader services live in the `video_renderer/` and `video
 3. Run `make uploader` once. If `YOUTUBE_TOKEN_FILE` does not exist, a browser window opens to complete the OAuth flow and the token is saved to that path.
 4. Subsequent `make uploader` runs will upload the next rendered part using the stored token.
 
+To automate uploads daily at 9 AM, add a crontab entry like:
+
+```bash
+0 9 * * * cd /path/to/dark-life && python cron_upload.py
+```
+
 ## Development
 
 This project uses [uv](https://github.com/astral-sh/uv) for Python dependency management and Next.js for the web frontend. Standard `make` targets are available for running tests and individual services:
