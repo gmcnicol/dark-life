@@ -10,7 +10,7 @@ This script exercises the happy path of the system:
 * enqueue render jobs for each part
 * poll until all jobs succeed
 * verify expected output files exist
-* optionally run the uploader in dry-run mode
+* run the uploader in dry-run mode
 
 The API base URL defaults to ``http://localhost:8000`` but can be overridden
 with the ``API_BASE_URL`` environment variable or ``--api-base`` CLI flag.
@@ -111,9 +111,6 @@ def _verify_outputs(story_id: int, jobs: List[Dict]) -> None:
 @APP.command()
 def run(
     api_base: str = typer.Option(API_BASE_DEFAULT, "--api-base", help="API base URL"),
-    uploader: bool = typer.Option(
-        False, "--uploader", help="Run uploader in dry-run mode", is_flag=True
-    ),
 ) -> None:
     """Execute the end-to-end smoke test."""
     story = _create_story(api_base)
@@ -125,10 +122,9 @@ def run(
         raise RuntimeError("no jobs enqueued")
     _poll_jobs(api_base, jobs)
     _verify_outputs(story_id, jobs)
-    if uploader:
-        from video_uploader.cron_upload import run as uploader_run
+    from video_uploader.cron_upload import run as uploader_run
 
-        uploader_run(limit=1, dry_run=True)
+    uploader_run(limit=1, dry_run=True)
     typer.echo(f"Smoke test succeeded for story {story_id}")
 
 

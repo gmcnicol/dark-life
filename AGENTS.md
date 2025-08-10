@@ -65,7 +65,7 @@ No optional features — just the minimal happy path.
 ---
 
 ## PHASE 5 — Smoke Test
-- [ ] Add `scripts/smoke_e2e.py`:
+- [x] Add `scripts/smoke_e2e.py`:
     1. Create story (API).
     2. Fetch/select images.
     3. Split.
