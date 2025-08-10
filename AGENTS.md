@@ -54,7 +54,7 @@ No optional features — just the minimal happy path.
 ---
 
 ## PHASE 4 — Uploader (YouTube Shorts POC)
-- [ ] Script `services/uploader/upload_youtube.py`:
+- [x] Script `services/uploader/upload_youtube.py`:
     - Find earliest rendered, unuploaded part.
     - Upload to YouTube Shorts (vertical ≤ 60s).
     - Record in `uploads` table.
