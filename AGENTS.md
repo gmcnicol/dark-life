@@ -58,7 +58,7 @@ No optional features — just the minimal happy path.
     - Find earliest rendered, unuploaded part.
     - Upload to YouTube Shorts (vertical ≤ 60s).
     - Record in `uploads` table.
-- [ ] Scheduler script `cron_upload.py`:
+- [x] Scheduler script `cron_upload.py`:
     - Run uploader once per execution.
     - Add to README: daily cron example.
 
