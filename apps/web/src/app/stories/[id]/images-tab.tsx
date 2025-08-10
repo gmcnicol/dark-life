@@ -97,7 +97,7 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
       >
         Auto-fetch images
       </button>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {(isLoading || fetchMutation.isLoading) &&
           Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="h-40 bg-neutral-800 animate-pulse rounded" />
@@ -106,7 +106,7 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
           images.map((img, index) => (
             <div
               key={img.id}
-              className={`relative border border-neutral-700 rounded overflow-hidden ${
+              className={`relative border border-neutral-700 rounded overflow-hidden cursor-pointer ${
                 img.selected ? "ring-2 ring-blue-500" : ""
               }`}
               draggable
@@ -121,6 +121,7 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
                 width={160}
                 height={160}
                 className="w-full h-40 object-cover"
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
               />
               {img.selected && (
                 <span className="absolute top-1 left-1 bg-blue-500 text-white text-xs px-1 rounded">
