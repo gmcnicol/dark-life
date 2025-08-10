@@ -15,11 +15,12 @@ reached.
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import datetime as dt
 import logging
 import time
 import uuid
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
 from sqlalchemy import Column, DateTime, MetaData, Table, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, insert as pg_insert
@@ -32,6 +33,7 @@ from .monitoring import (
     REJECTED_POSTS,
 )
 from .normalizer import normalize_post
+from .normalize import normalize_and_filter
 from .media import extract_image_urls
 from .events import push_new_story
 from .storage import (
@@ -40,6 +42,7 @@ from .storage import (
     record_rejection,
     run_with_session,
 )
+from shared.config import settings
 
 logger = logging.getLogger(__name__)
 MIN_UPVOTES = int(os.getenv("REDDIT_MIN_UPVOTES", "0"))
@@ -171,6 +174,22 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[dat
     return inserted, earliest_dt
 
 
+def _upsert_batch(batch: List[Dict[str, Any]]) -> Tuple[int, int, int]:
+    """Insert a batch of normalized docs, returning counts."""
+
+    def op(session):
+        inserted = 0
+        duplicates = 0
+        for doc in batch:
+            if insert_post(session, doc):
+                inserted += 1
+            else:
+                duplicates += 1
+        return inserted, duplicates, 0
+
+    return run_with_session(op)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -217,39 +236,109 @@ class BackfillResult:
     earliest: Optional[datetime]
 
 
-def orchestrate_backfill(
-    subreddit: str,
-    *,
-    earliest_target_utc: Optional[int] = None,
-    client: RedditClient | None = None,
-    window_seconds: int = 7 * 24 * 60 * 60,
-) -> int:
-    """Backfill ``subreddit`` moving backwards until ``earliest_target_utc``.
+def orchestrate_backfill(subreddit: str, earliest_iso: str) -> Dict[str, Any]:
+    """Bounded backfill using ``new`` listing with optional cloudsearch windows."""
 
-    Returns the total number of inserted posts.
-    """
+    earliest_dt = dt.datetime.fromisoformat(earliest_iso)
+    earliest_ts = int(earliest_dt.timestamp())
 
-    client = client or RedditClient()
-    total_inserted = 0
-    end = int(datetime.now(tz=timezone.utc).timestamp())
+    rc = RedditClient(
+        client_id=settings.REDDIT_CLIENT_ID,
+        client_secret=settings.REDDIT_CLIENT_SECRET,
+        user_agent=settings.REDDIT_USER_AGENT,
+    )
 
-    while True:
-        start = end - window_seconds
-        if earliest_target_utc is not None and start < earliest_target_utc:
-            start = earliest_target_utc
-        inserted, earliest = backfill_by_window(
-            subreddit, start, end, client=client
-        )
-        total_inserted += inserted
+    max_pages = int(settings.BACKFILL_MAX_PAGES)
+    use_cloud = bool(settings.BACKFILL_USE_CLOUDSEARCH)
 
-        if inserted == 0 or earliest is None:
-            break
+    inserted = 0
+    dup = 0
+    rejected = 0
+    newest_seen = None
+    oldest_seen = None
 
-        end = int(earliest.timestamp()) - 1
-        if earliest_target_utc is not None and end <= earliest_target_utc:
-            break
+    page_count = 0
+    batch: List[Dict[str, Any]] = []
+    for i, post in enumerate(rc.list_new(subreddit, limit=None), start=1):
+        created_ts = int(getattr(post, "created_utc", 0))
+        if newest_seen is None or created_ts > newest_seen:
+            newest_seen = created_ts
+        if oldest_seen is None or created_ts < oldest_seen:
+            oldest_seen = created_ts
 
-    return total_inserted
+        doc = normalize_and_filter(post)
+        if doc is None:
+            rejected += 1
+        else:
+            batch.append(doc)
+
+        if len(batch) >= 200:
+            ins, d, _ = _upsert_batch(batch)
+            inserted += ins
+            dup += d
+            batch = []
+
+        if i % 100 == 0:
+            page_count += 1
+            if page_count >= max_pages or created_ts < earliest_ts:
+                logger.info(
+                    "stop paging: pages=%s created_ts=%s earliest_ts=%s",
+                    page_count,
+                    created_ts,
+                    earliest_ts,
+                )
+                break
+
+    if batch:
+        ins, d, _ = _upsert_batch(batch)
+        inserted += ins
+        dup += d
+
+    if oldest_seen and oldest_seen <= earliest_ts:
+        return {
+            "inserted": inserted,
+            "duplicates": dup,
+            "rejected": rejected,
+            "oldest_seen": oldest_seen,
+            "newest_seen": newest_seen,
+            "note": "Reached earliest via listing",
+        }
+
+    if use_cloud:
+        end_dt = dt.datetime.utcfromtimestamp(oldest_seen or int(time.time()))
+        for _ in range(6):
+            start_dt = end_dt - dt.timedelta(days=30)
+            posts = rc.search_between(
+                subreddit, int(start_dt.timestamp()), int(end_dt.timestamp())
+            )
+            batch = []
+            for post in posts:
+                created_ts = int(getattr(post, "created_utc", 0))
+                if oldest_seen is None or created_ts < oldest_seen:
+                    oldest_seen = created_ts
+                doc = normalize_and_filter(post)
+                if doc is None:
+                    rejected += 1
+                else:
+                    batch.append(doc)
+            if batch:
+                ins, d, _ = _upsert_batch(batch)
+                inserted += ins
+                dup += d
+            end_dt = start_dt
+            if oldest_seen and oldest_seen <= earliest_ts:
+                break
+
+    return {
+        "inserted": inserted,
+        "duplicates": dup,
+        "rejected": rejected,
+        "oldest_seen": oldest_seen,
+        "newest_seen": newest_seen,
+        "note": "Bounded backfill; cloudsearch best-effort"
+        if use_cloud
+        else "Bounded backfill only",
+    }
 
 
 __all__ = ["backfill_by_window", "orchestrate_backfill", "BackfillResult"]

@@ -43,6 +43,29 @@ Monorepo for automating short-form dark storytelling videos.
 
 Admin APIs require `Authorization: Bearer $ADMIN_API_TOKEN`.
 
+## Reddit Ingestion
+
+The Reddit ingestor uses the official API. When paging `subreddit.new()` there
+is a practical cap of roughly 1000 items; historical range queries are not
+guaranteed. Backfill performs bounded paging and optionally attempts
+cloudsearch time windows. These windows are best-effort and may return zero
+results without failing the job. Fetching deep history beyond the official API
+limits requires Pushshift or moderator-only keys.
+
+Sanity check:
+
+```bash
+docker compose -f infra/docker-compose.yml --profile ops run --rm reddit_ingestor sh -lc '
+python - <<PY
+import os,praw
+r=praw.Reddit(client_id=os.environ["REDDIT_CLIENT_ID"], client_secret=os.environ["REDDIT_CLIENT_SECRET"], user_agent=os.environ.get("REDDIT_USER_AGENT","darklife/1.0"))
+items=list(r.subreddit("nosleep").new(limit=5))
+print("fetched",len(items),"newest nosleep")
+for s in items: print(s.id, int(s.created_utc), s.title[:80])
+PY
+'
+```
+
 ## Environment variables
 
 See [`.env.sample`](.env.sample) for the full list of configuration options.
