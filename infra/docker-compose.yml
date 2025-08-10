@@ -1,73 +1,102 @@
-version: "3.9"
-
+version: '3.9'
 services:
   postgres:
     image: postgres:15
-    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-dark_life}
+      POSTGRES_DB: ${POSTGRES_DB:-darklife}
     volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   api:
-    image: tiangolo/uvicorn-gunicorn-fastapi:python3.11
-    volumes:
-      - ..:/app
-    env_file:
-      - ../apps/api/.env
-    environment:
-      MODULE_NAME: apps.api.main
-      VARIABLE_NAME: app
-      PORT: 8000
-    depends_on:
-      - postgres
-      - redis
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    env_file: ../.env
     ports:
       - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   web:
-    image: node:20
-    working_dir: /app/apps/web
-    volumes:
-      - ..:/app
-    command: sh -c "npm install && npm run dev"
-    env_file:
-      - ../apps/web/.env
-    depends_on:
-      - api
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    env_file: ../.env
     ports:
       - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   renderer:
-    image: python:3.11
-    working_dir: /app
+    build:
+      context: ..
+      dockerfile: services/renderer/Dockerfile
+    env_file: ../.env
     volumes:
-      - ..:/app
-      - output:/output
-    command: sh -c "sleep infinity"
-    profiles:
-      - workers
+      - ../output:/output
+      - ../content:/content
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   uploader:
-    image: python:3.11
-    working_dir: /app
+    build:
+      context: ..
+      dockerfile: services/uploader/Dockerfile
+    env_file: ../.env
     volumes:
-      - ..:/app
-      - output:/output
-    command: sh -c "sleep infinity"
+      - ../output:/output
+      - ../secrets:/secrets:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  reddit_ingestor:
+    build:
+      context: ..
+      dockerfile: services/reddit_ingestor/Dockerfile
+    env_file: ../.env
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     profiles:
-      - workers
+      - ops
 
 volumes:
-  pgdata:
-  output:
+  postgres_data:
+  redis_data:
