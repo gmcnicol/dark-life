@@ -39,6 +39,27 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://postgres:postgres@postgres:5432/darklife",
         description="Postgres connection string",
     )
+    BACKFILL_USE_CLOUDSEARCH: bool = Field(
+        default=False, description="Use cloudsearch windows during backfill"
+        )
+    BACKFILL_MAX_PAGES: int = Field(
+        default=12, description="Max pages fetched via new()"
+        )
+    LOG_LEVEL: str = Field(
+        default="INFO", description="Logging level"
+        )
+    DEBUG_INGEST_SAMPLE: bool = Field(
+        default=False, description="Log sample titles during ingest"
+        )
+    REDDIT_CLIENT_ID: str = Field(
+        default="", description="Reddit API client id"
+        )
+    REDDIT_CLIENT_SECRET: str = Field(
+        default="", description="Reddit API client secret"
+        )
+    REDDIT_USER_AGENT: str = Field(
+        default="darklife/1.0", description="User agent for Reddit API"
+        )
 
 
 settings = Settings()
