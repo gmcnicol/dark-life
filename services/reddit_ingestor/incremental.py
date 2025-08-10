@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import logging
 import time
 import uuid
+import os
 from typing import List, Optional, Tuple
 
 from sqlalchemy import Column, DateTime, MetaData, Table, Text, func, select
@@ -37,6 +38,7 @@ from .storage import (
 )
 
 logger = logging.getLogger(__name__)
+MIN_UPVOTES = int(os.getenv("REDDIT_MIN_UPVOTES", "0"))
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +111,13 @@ def _process_posts(subreddit: str, posts: List[dict]) -> Tuple[int, Optional[str
         newest_fullname: Optional[str] = None
         newest_dt: Optional[datetime] = None
         for post in posts:
-            normalized, reason = normalize_post(post)
             created_dt = datetime.fromtimestamp(int(post.get("created_utc", 0)), tz=timezone.utc)
             fullname = post.get("name") or f"t3_{post.get('id')}"
+            if int(post.get("ups") or post.get("score") or 0) < MIN_UPVOTES:
+                rejected += 1
+                record_rejection(session, fullname, subreddit, "low_upvotes", post)
+                continue
+            normalized, reason = normalize_post(post)
             if normalized:
                 if is_fuzzy_duplicate(session, subreddit, normalized.title, normalized.body):
                     duplicates += 1
