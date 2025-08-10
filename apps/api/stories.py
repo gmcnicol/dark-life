@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import os
 import re
-from typing import Iterable
+from typing import Iterable, Any
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, status, Response
@@ -226,7 +226,7 @@ def list_images(
     return session.exec(
         select(Asset)
         .where(Asset.story_id == story_id, Asset.type == "image")
-        .order_by(Asset.rank, Asset.id)
+        .order_by(Asset.rank.is_(None), Asset.rank, Asset.id)
     ).all()
 
 
@@ -307,7 +307,7 @@ def split_story(
 @router.post("/{story_id}/enqueue-series", status_code=status.HTTP_202_ACCEPTED)
 def enqueue_series(
     story_id: int, session: Session = Depends(get_session)
-) -> dict[str, list[dict[str, int]]]:
+) -> dict[str, list[dict[str, Any]]]:
     """Enqueue render_part jobs for each part of the story."""
     story = session.get(Story, story_id)
     if not story:
@@ -354,7 +354,9 @@ def enqueue_series(
         "jobs": [
             {
                 "id": job.id,
+                "story_id": job.story_id,
                 "part_index": job.payload.get("part_index") if job.payload else None,
+                "asset_ids": job.payload.get("asset_ids") if job.payload else [],
             }
             for job in jobs
         ]
