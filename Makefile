@@ -37,4 +37,10 @@ smoke:
 	python scripts/smoke_e2e.py
 
 test:
-	uv run --with pytest,httpx pytest -q
+        uv run --with pytest,httpx pytest -q
+
+reddit-backfill:
+        uv run python -m services.reddit_ingestor.cli backfill --subreddits "$(SUBS)" --earliest $(EARLIEST)
+
+reddit-incremental:
+        uv run python -m services.reddit_ingestor.cli incremental --subreddits "$(SUBS)"
