@@ -2,11 +2,28 @@ import logging
 from typing import Iterable, List, Dict, Any, Optional
 import praw
 
+from shared.config import settings
+
+
 log = logging.getLogger(__name__)
 
 
 class RedditClient:
-    def __init__(self, client_id: str, client_secret: str, user_agent: str):
+    def __init__(
+        self,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> None:
+        """Create a PRAW Reddit client using env defaults when not provided."""
+
+        client_id = client_id or settings.REDDIT_CLIENT_ID
+        client_secret = client_secret or settings.REDDIT_CLIENT_SECRET
+        user_agent = user_agent or settings.REDDIT_USER_AGENT
+
+        if not all([client_id, client_secret, user_agent]):
+            raise ValueError("Reddit API credentials are required")
+
         self._r = praw.Reddit(
             client_id=client_id,
             client_secret=client_secret,
