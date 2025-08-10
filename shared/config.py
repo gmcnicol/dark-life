@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         description="Path to stored YouTube OAuth token",
     )
     DATABASE_URL: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/darklife",
+        default="postgresql+psycopg://postgres:postgres@postgres:5432/darklife",
         description="Postgres connection string",
     )
 

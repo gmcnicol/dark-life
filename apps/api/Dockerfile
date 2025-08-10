@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY apps/api/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
+COPY alembic.ini /app/alembic.ini
 COPY apps/api /app/apps/api
 COPY services/reddit_ingestor /app/services/reddit_ingestor
 COPY shared /app/shared

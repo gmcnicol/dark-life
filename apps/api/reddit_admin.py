@@ -17,8 +17,12 @@ router = APIRouter(prefix="/admin/reddit", tags=["admin-reddit"])
 
 ADMIN_TOKEN = os.getenv("ADMIN_API_TOKEN")
 
-def require_token(x_admin_token: str = Header(..., alias="X-Admin-Token")) -> None:
-    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+
+def require_token(authorization: str = Header(...)) -> None:
+    if not ADMIN_TOKEN or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    if token != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

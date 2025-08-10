@@ -2,49 +2,51 @@
 
 Monorepo for automating short-form dark storytelling videos.
 
-## Run the full stack
+## Local POC Runbook
 
-1. `cp .env.sample .env` and fill in API keys and secrets.
-2. `docker compose -f infra/docker-compose.yml build`
-3. `docker compose -f infra/docker-compose.yml up -d postgres redis`
-4. `docker compose -f infra/docker-compose.yml up -d api web`
-5. (optional) `docker compose -f infra/docker-compose.yml up -d renderer`
-6. Visit <http://localhost:3000> for the web app and <http://localhost:8000/health> for the API.
+1. **Prereqs**
+   - Docker & Compose
+   - Node 20
+   - Python 3.11
+   - `ffmpeg` (only if running tools outside containers)
 
-## Renderer & Uploader
+2. **Setup**
+   ```bash
+   cp .env.sample .env
+   ```
+   Fill any optional API keys and secrets. `ADMIN_API_TOKEN` defaults to `local-admin`.
 
-The renderer polls the database for jobs and writes videos to `./output`.
+3. **Build & start**
+   ```bash
+   docker compose -f infra/docker-compose.yml build
+   make up
+   make migrate
+   ```
 
-Run the uploader ad-hoc:
+4. **Open services**
+   - Web: <http://localhost:3000>
+   - API health: <http://localhost:8000/health>
 
-```bash
-make uploader
-```
+5. **Renderer & uploader**
+   ```bash
+   make renderer      # start background renderer
+   make uploader      # run upload once
+   ```
 
-Schedule uploads via cron or a CI system to run regularly.
+6. **Troubleshooting**
+   - `pnpm-lock.yaml not found` → web uses npm Dockerfile
+   - `psycopg not found` → ensure `psycopg[binary]` installed and rebuild API
+   - Database connection errors → `DATABASE_URL` must use host `postgres`
+   - `8000` in use → change host mapping to `8001:8000`
 
-## Reddit ingestion
+### Admin endpoints
 
-Run incremental ingestion:
-
-```bash
-make ingest
-```
-
-Run a backfill with custom parameters:
-
-```bash
-make backfill EARLIEST=2008-01-01 SUBS="nosleep,confession"
-```
-
-An admin UI (if enabled) can also trigger ingestion jobs.
+Admin APIs require `Authorization: Bearer $ADMIN_API_TOKEN`.
 
 ## Environment variables
 
-See [`.env.sample`](.env.sample) for all configuration options.
+See [`.env.sample`](.env.sample) for the full list of configuration options.
 
-## Troubleshooting
+## Renderer & Uploader
 
-- Check container healthchecks with `docker compose ps`.
-- Ensure the `./output` and `./secrets` directories have appropriate permissions.
-- Image and Reddit providers enforce rate limits; retries may be required.
+The renderer polls the database for jobs and writes videos to `./output`. Schedule the uploader with cron or CI to publish rendered parts regularly.
