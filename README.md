@@ -39,6 +39,14 @@ Monorepo for automating short-form dark storytelling videos.
    - Database connection errors → `DATABASE_URL` must use host `postgres`
    - `8000` in use → change host mapping to `8001:8000`
 
+## Running Migrations
+
+Run database migrations from the repository root once your `.env` is configured:
+
+```bash
+docker compose -f infra/docker-compose.yml run --rm api sh -lc 'cd apps/api && alembic upgrade head'
+```
+
 ### Admin endpoints
 
 Admin APIs require `Authorization: Bearer $ADMIN_API_TOKEN`.
