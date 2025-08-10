@@ -42,7 +42,7 @@ No optional features — just the minimal happy path.
         - selected image IDs
         - text for narration
         - subtitle=true
-- [ ] Renderer worker:
+- [x] Renderer worker:
     - Poll queued `render_part` jobs.
     - Download/copy selected images.
     - Generate placeholder narration (TTS optional).
