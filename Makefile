@@ -1,5 +1,5 @@
 .RECIPEPREFIX := >
-.PHONY: init sync test up down logs api web renderer uploader ingest backfill rebuild migrate smoke
+.PHONY: init sync test up down logs api web renderer uploader ingest rebuild migrate smoke
 
 VENV_DIR := .venv
 COMPOSE := docker compose -f infra/docker-compose.yml
@@ -38,7 +38,7 @@ uploader:
 >$(COMPOSE) run --rm uploader
 
 ingest:
->$(COMPOSE) --profile ops run --rm reddit_ingestor backfill
+>$(COMPOSE) --profile ops run --rm reddit_ingestor incremental
 
 rebuild:
 >$(COMPOSE) build --no-cache

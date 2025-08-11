@@ -59,7 +59,15 @@ class Settings(BaseSettings):
         )
     REDDIT_USER_AGENT: str = Field(
         default="darklife/1.0", description="User agent for Reddit API"
-        )
+    )
+    API_BASE_URL: str = Field(
+        default="",
+        description="Base URL for the Dark Life API (used by ingestors)",
+    )
+    ADMIN_API_TOKEN: str = Field(
+        default="",
+        description="Bearer token for privileged API access",
+    )
 
 
 settings = Settings()
