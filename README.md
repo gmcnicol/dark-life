@@ -25,7 +25,7 @@ Monorepo for automating short-form dark storytelling videos.
 
 4. **Open services**
    - Web: <http://localhost:3000>
-   - API health: <http://localhost:8000/health>
+   - API health: <http://localhost:8000/readyz>
 
 5. **Renderer & uploader**
    ```bash
