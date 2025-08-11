@@ -46,6 +46,7 @@ from shared.config import settings
 
 logger = logging.getLogger(__name__)
 MIN_UPVOTES = int(os.getenv("REDDIT_MIN_UPVOTES", "0"))
+DEFAULT_BACKFILL_START = dt.datetime(2023, 1, 1, tzinfo=timezone.utc)
 
 # ---------------------------------------------------------------------------
 # ``reddit_fetch_state`` table (minimal definition for updates)
@@ -236,11 +237,12 @@ class BackfillResult:
     earliest: Optional[datetime]
 
 
-def orchestrate_backfill(subreddit: str, earliest_iso: str) -> Dict[str, Any]:
+def orchestrate_backfill(
+    subreddit: str, earliest_target_utc: Optional[int] = None
+) -> Dict[str, Any]:
     """Bounded backfill using ``new`` listing with optional cloudsearch windows."""
 
-    earliest_dt = dt.datetime.fromisoformat(earliest_iso)
-    earliest_ts = int(earliest_dt.timestamp())
+    earliest_ts = earliest_target_utc or int(DEFAULT_BACKFILL_START.timestamp())
 
     rc = RedditClient(
         client_id=settings.REDDIT_CLIENT_ID,
@@ -341,4 +343,9 @@ def orchestrate_backfill(subreddit: str, earliest_iso: str) -> Dict[str, Any]:
     }
 
 
-__all__ = ["backfill_by_window", "orchestrate_backfill", "BackfillResult"]
+__all__ = [
+    "backfill_by_window",
+    "orchestrate_backfill",
+    "BackfillResult",
+    "DEFAULT_BACKFILL_START",
+]
