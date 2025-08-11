@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-"""Database storage helpers for the Reddit ingestion service.
+"""Persistence helpers for the Reddit ingestion service.
 
-This module provides utilities to insert posts into ``reddit_posts`` while
-handling duplicates via PostgreSQL's ``ON CONFLICT`` clause. It also records
-rejected posts for later inspection. Lightweight helpers are included to manage
-sessions and retry transient failures.
+This module stores posts either directly in the local database or, when an
+``API_BASE_URL`` is configured, forwards them to the API's admin endpoint.
+Older direct-DB helpers remain for test environments which set no API base URL.
 """
 
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Callable, Dict, TypeVar
 from difflib import SequenceMatcher
 
@@ -29,6 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+import requests
 
 from shared.config import settings
 
@@ -78,7 +79,9 @@ reddit_rejections = Table(
 # Session helpers
 # ---------------------------------------------------------------------------
 
-def run_with_session(operation: Callable[[Session], T], *, retries: int = 3, backoff: float = 0.5) -> T:
+def run_with_session(
+    operation: Callable[[Session | None], T], *, retries: int = 3, backoff: float = 0.5
+) -> T:
     """Execute ``operation`` within a session with retry logic.
 
     Parameters
@@ -91,6 +94,10 @@ def run_with_session(operation: Callable[[Session], T], *, retries: int = 3, bac
     backoff:
         Base backoff in seconds between retries. Exponential growth is applied.
     """
+
+    if settings.API_BASE_URL:
+        # No direct DB access; caller must handle persistence via API.
+        return operation(None)
 
     attempt = 0
     while True:
@@ -115,13 +122,45 @@ def run_with_session(operation: Callable[[Session], T], *, retries: int = 3, bac
 # Public API
 # ---------------------------------------------------------------------------
 
-def insert_post(session: Session, payload: Dict[str, Any]) -> bool:
-    """Insert a Reddit post into ``reddit_posts``.
+def insert_post(session: Session | None, payload: Dict[str, Any]) -> bool:
+    """Persist a Reddit post via API or direct DB insert.
 
-    Returns ``True`` if the post was inserted, or ``False`` when a duplicate was
-    detected via the ``reddit_id`` or ``(subreddit, hash_title_body)`` unique
-    constraints.
+    When ``settings.API_BASE_URL`` is set the payload is translated into the
+    API's ``StoryIn`` schema and POSTed to ``/admin/stories``.  Otherwise the
+    legacy ``reddit_posts`` table is written to directly.  Returns ``True`` when
+    the post was created/updated, ``False`` for duplicates.
     """
+
+    if settings.API_BASE_URL:
+        story = {
+            "external_id": payload["reddit_id"],
+            "source": "reddit",
+            "title": payload["title"],
+            "author": payload.get("author"),
+            "created_utc": int(payload["created_utc"].timestamp())
+            if isinstance(payload["created_utc"], datetime)
+            else int(payload["created_utc"]),
+            "text": payload.get("selftext"),
+            "url": payload.get("url"),
+            "nsfw": payload.get("nsfw"),
+            "flair": None,
+            "tags": None,
+        }
+        headers = {}
+        if settings.ADMIN_API_TOKEN:
+            headers["Authorization"] = f"Bearer {settings.ADMIN_API_TOKEN}"
+        resp = requests.post(
+            f"{settings.API_BASE_URL.rstrip('/')}/admin/stories",
+            json=story,
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code in (200, 201):
+            return True
+        if resp.status_code == 409:
+            return False
+        resp.raise_for_status()
+        return False
 
     values = {"id": uuid.uuid4(), **payload}
     stmt = pg_insert(reddit_posts).values(values).on_conflict_do_nothing()
@@ -130,7 +169,7 @@ def insert_post(session: Session, payload: Dict[str, Any]) -> bool:
 
 
 def is_fuzzy_duplicate(
-    session: Session,
+    session: Session | None,
     subreddit: str,
     title: str,
     body: str,
@@ -144,6 +183,9 @@ def is_fuzzy_duplicate(
     similarity ratio meets or exceeds ``threshold`` the post is considered a
     duplicate.
     """
+
+    if session is None:
+        return False
 
     combined = f"{title} {body}".strip()
     if not combined:
@@ -159,14 +201,15 @@ def is_fuzzy_duplicate(
     return False
 
 def record_rejection(
-    session: Session,
+    session: Session | None,
     reddit_id: str,
     subreddit: str,
     reason: str,
     payload: Dict[str, Any] | None = None,
 ) -> None:
     """Record a rejected post for auditing purposes."""
-
+    if session is None:
+        return
     stmt = reddit_rejections.insert().values(
         id=uuid.uuid4(),
         reddit_id=reddit_id,

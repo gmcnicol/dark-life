@@ -36,6 +36,7 @@ from .storage import (
     record_rejection,
     run_with_session,
 )
+from shared.config import settings
 
 logger = logging.getLogger(__name__)
 MIN_UPVOTES = int(os.getenv("REDDIT_MIN_UPVOTES", "0"))
@@ -64,6 +65,9 @@ reddit_fetch_state = Table(
 def _load_fetch_state(subreddit: str) -> Tuple[Optional[str], Optional[datetime]]:
     """Return ``(last_fullname, last_created_utc)`` for ``subreddit``."""
 
+    if settings.API_BASE_URL:
+        return None, None
+
     def op(session):
         stmt = select(
             reddit_fetch_state.c.last_fullname, reddit_fetch_state.c.last_created_utc
@@ -78,6 +82,9 @@ def _load_fetch_state(subreddit: str) -> Tuple[Optional[str], Optional[datetime]
 
 def _update_fetch_state(session, subreddit: str, fullname: str, created: datetime) -> None:
     """Upsert ``last_fullname`` and ``last_created_utc`` for ``subreddit``."""
+
+    if session is None:
+        return
 
     stmt = pg_insert(reddit_fetch_state).values(
         id=uuid.uuid4(),
