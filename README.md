@@ -16,11 +16,11 @@ Monorepo for automating short-form dark storytelling videos.
    ```
    Fill any optional API keys and secrets. `ADMIN_API_TOKEN` defaults to `local-admin`.
 
-3. **Build & start**
+3. **Migrate & start**
    ```bash
    docker compose -f infra/docker-compose.yml build
+   make migrate   # apply migrations before starting the API
    make up
-   make migrate
    ```
 
 4. **Open services**
@@ -41,7 +41,7 @@ Monorepo for automating short-form dark storytelling videos.
 
 ## Running Migrations
 
-Run database migrations from the repository root once your `.env` is configured:
+Run database migrations from the repository root once your `.env` is configured, before starting the API:
 
 ```bash
 docker compose -f infra/docker-compose.yml run --rm api sh -lc 'cd apps/api && alembic upgrade head'
