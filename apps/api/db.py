@@ -21,6 +21,9 @@ def init_db() -> None:
     """Run Alembic migrations to ensure the schema is up to date."""
     root_path = Path(__file__).resolve().parents[2]
     alembic_cfg = Config(str(root_path / "alembic.ini"))
+    alembic_cfg.set_main_option(
+        "script_location", str(root_path / "apps/api/alembic")
+    )
     alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
     logger.info("running alembic upgrade head")
     command.upgrade(alembic_cfg, "head")
