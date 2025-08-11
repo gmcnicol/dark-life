@@ -28,8 +28,7 @@ services:
       context: ..
       dockerfile: apps/api/Dockerfile
     working_dir: /app/apps/api
-    env_file:
-      - ../.env
+    env_file: ../.env
     environment:
       - PYTHONPATH=/app
     ports:
@@ -91,8 +90,7 @@ services:
     build:
       context: ..
       dockerfile: services/reddit_ingestor/Dockerfile
-    env_file:
-      - ../.env
+    env_file: ../.env
     depends_on:
       api:
         condition: service_healthy
