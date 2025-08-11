@@ -42,6 +42,7 @@ reddit_fetch_state = Table(
     Column("subreddit", Text, unique=True, nullable=False),
     Column("last_fullname", Text),
     Column("last_created_utc", DateTime(timezone=True)),
+    Column("mode", Text),
     Column("backfill_earliest_utc", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()),
 )
@@ -113,6 +114,7 @@ def fetch_state(
         reddit_fetch_state.c.subreddit,
         reddit_fetch_state.c.last_fullname,
         reddit_fetch_state.c.last_created_utc,
+        reddit_fetch_state.c.mode,
         reddit_fetch_state.c.backfill_earliest_utc,
         reddit_fetch_state.c.updated_at,
     )
