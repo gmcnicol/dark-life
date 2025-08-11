@@ -17,6 +17,15 @@ class StoryBase(SQLModel):
     source_url: Optional[str] = None
     body_md: Optional[str] = None
     status: str = "draft"
+    source: Optional[str] = None
+    external_id: Optional[str] = None
+    author: Optional[str] = None
+    created_utc: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True))
+    )
+    nsfw: Optional[bool] = None
+    flair: Optional[str] = None
+    tags: list[str] | None = Field(default=None, sa_column=Column(JSON))
 
 
 class Story(StoryBase, table=True):
@@ -30,6 +39,10 @@ class Story(StoryBase, table=True):
         sa_column=Column(
             DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
         )
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="uq_story_source_external"),
     )
 
 
@@ -53,6 +66,13 @@ class StoryUpdate(SQLModel):
     source_url: Optional[str] = None
     body_md: Optional[str] = None
     status: Optional[str] = None
+    source: Optional[str] = None
+    external_id: Optional[str] = None
+    author: Optional[str] = None
+    created_utc: datetime | None = None
+    nsfw: Optional[bool] = None
+    flair: Optional[str] = None
+    tags: list[str] | None = None
 
 
 class StoryPart(SQLModel, table=True):
