@@ -23,6 +23,7 @@ dependencies = [
     "fastapi",
     "sqlmodel",
     "psycopg2-binary",
+    "alembic",
     "faster-whisper",
     "google-api-python-client",
     "google-auth-oauthlib",
