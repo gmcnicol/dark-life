@@ -15,7 +15,7 @@ export class DefaultService {
     public static healthHealthGet(): CancelablePromise<Record<string, string>> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/health',
+            url: '/healthz',
         });
     }
 }
