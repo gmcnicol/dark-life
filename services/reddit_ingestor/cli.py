@@ -14,6 +14,7 @@ This module exposes a small Typer based CLI with three commands:
 
 from datetime import datetime, timezone
 from typing import List
+import os
 
 import typer
 from sqlalchemy import func, select
@@ -24,41 +25,41 @@ from .storage import reddit_posts, run_with_session
 
 app = typer.Typer(add_completion=False, help="Reddit ingestion commands")
 
+DEFAULT_BACKFILL_START = datetime(2023, 1, 1, tzinfo=timezone.utc)
 
-def _parse_subreddits(value: str) -> List[str]:
-    """Split a comma separated list of subreddits."""
 
-    return [s.strip() for s in value.split(",") if s.strip()]
+def _subreddits_from_env() -> List[str]:
+    """Fetch default subreddits from the environment."""
+
+    value = os.getenv("REDDIT_DEFAULT_SUBREDDITS", "")
+    subs = [s.strip() for s in value.split(",") if s.strip()]
+    if not subs:
+        typer.echo(
+            "REDDIT_DEFAULT_SUBREDDITS env var must specify subreddits", err=True
+        )
+        raise typer.Exit(code=10)
+    return subs
 
 
 @app.command()
-def backfill(
-    subreddits: str = typer.Option(
-        ..., "--subreddits", help="Comma separated list of subreddits"
-    ),
-    earliest: datetime = typer.Option(
-        ..., "--earliest", formats=["%Y-%m-%d"], help="Earliest date (UTC) to backfill"
-    ),
-) -> None:
-    """Backfill historical posts for ``subreddits``."""
+def backfill() -> None:
+    """Backfill historical posts for default subreddits."""
 
-    subs = _parse_subreddits(subreddits)
-    earliest_ts = int(earliest.replace(tzinfo=timezone.utc).timestamp())
+    subs = _subreddits_from_env()
+    earliest_ts = int(DEFAULT_BACKFILL_START.timestamp())
     for sub in subs:
-        typer.echo(f"Backfilling {sub} starting from {earliest.date()}...")
+        typer.echo(
+            f"Backfilling {sub} starting from {DEFAULT_BACKFILL_START.date()}..."
+        )
         inserted = orchestrate_backfill(sub, earliest_target_utc=earliest_ts)
         typer.echo(f"Inserted {inserted} posts for r/{sub}")
 
 
 @app.command()
-def incremental(
-    subreddits: str = typer.Option(
-        ..., "--subreddits", help="Comma separated list of subreddits"
-    )
-) -> None:
-    """Fetch new posts for ``subreddits``."""
+def incremental() -> None:
+    """Fetch new posts for default subreddits."""
 
-    subs = _parse_subreddits(subreddits)
+    subs = _subreddits_from_env()
     for sub in subs:
         typer.echo(f"Fetching new posts for {sub}...")
         inserted = fetch_incremental(sub)
@@ -66,39 +67,41 @@ def incremental(
 
 
 @app.command()
-def verify(
-    subreddit: str = typer.Option(..., "--subreddit", help="Subreddit to verify")
-) -> None:
-    """Verify stored posts for ``subreddit``."""
+def verify() -> None:
+    """Verify stored posts for default subreddits."""
 
-    def op(session):
-        total = session.execute(
-            select(func.count()).select_from(reddit_posts).where(
-                reddit_posts.c.subreddit == subreddit
-            )
-        ).scalar()
-        dup_ids = session.execute(
-            select(reddit_posts.c.reddit_id, func.count())
-            .where(reddit_posts.c.subreddit == subreddit)
-            .group_by(reddit_posts.c.reddit_id)
-            .having(func.count() > 1)
-        ).all()
-        dup_hash = session.execute(
-            select(reddit_posts.c.hash_title_body, func.count())
-            .where(reddit_posts.c.subreddit == subreddit)
-            .group_by(reddit_posts.c.hash_title_body)
-            .having(func.count() > 1)
-        ).all()
-        return total, dup_ids, dup_hash
+    subs = _subreddits_from_env()
+    for subreddit in subs:
+        typer.echo(f"Verifying {subreddit}...")
 
-    total, dup_ids, dup_hash = run_with_session(op)
-    typer.echo(f"Total posts: {total}")
-    if dup_ids:
-        typer.echo(f"Duplicate reddit_id entries: {dup_ids}")
-    if dup_hash:
-        typer.echo(f"Duplicate hash_title_body entries: {dup_hash}")
-    if not dup_ids and not dup_hash:
-        typer.echo("No duplicates found.")
+        def op(session):
+            total = session.execute(
+                select(func.count()).select_from(reddit_posts).where(
+                    reddit_posts.c.subreddit == subreddit
+                )
+            ).scalar()
+            dup_ids = session.execute(
+                select(reddit_posts.c.reddit_id, func.count())
+                .where(reddit_posts.c.subreddit == subreddit)
+                .group_by(reddit_posts.c.reddit_id)
+                .having(func.count() > 1)
+            ).all()
+            dup_hash = session.execute(
+                select(reddit_posts.c.hash_title_body, func.count())
+                .where(reddit_posts.c.subreddit == subreddit)
+                .group_by(reddit_posts.c.hash_title_body)
+                .having(func.count() > 1)
+            ).all()
+            return total, dup_ids, dup_hash
+
+        total, dup_ids, dup_hash = run_with_session(op)
+        typer.echo(f"Total posts: {total}")
+        if dup_ids:
+            typer.echo(f"Duplicate reddit_id entries: {dup_ids}")
+        if dup_hash:
+            typer.echo(f"Duplicate hash_title_body entries: {dup_hash}")
+        if not dup_ids and not dup_hash:
+            typer.echo("No duplicates found.")
 
 
 if __name__ == "__main__":  # pragma: no cover

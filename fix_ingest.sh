@@ -143,5 +143,6 @@ docker compose -f infra/docker-compose.yml build --no-cache reddit_ingestor
 echo
 echo "All set. reddit_ingestor now builds with shared/ and required deps."
 echo "Next steps:"
-echo "  - To run incremental: docker compose -f infra/docker-compose.yml --profile ops run --rm reddit_ingestor incremental --subreddits \"nosleep,confession\""
-echo "  - To run backfill:    docker compose -f infra/docker-compose.yml --profile ops run --rm reddit_ingestor backfill --subreddits \"nosleep,confession\" --earliest 2008-01-01"
+echo "  - Set REDDIT_DEFAULT_SUBREDDITS in .env"
+echo "  - To run incremental: docker compose -f infra/docker-compose.yml --profile ops run --rm reddit_ingestor incremental"
+echo "  - To run backfill:    docker compose -f infra/docker-compose.yml --profile ops run --rm reddit_ingestor backfill"
