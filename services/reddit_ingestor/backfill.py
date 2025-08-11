@@ -69,6 +69,8 @@ reddit_fetch_state = Table(
 
 def _update_fetch_state(session, subreddit: str, earliest: datetime) -> None:
     """Upsert ``reddit_fetch_state.backfill_earliest_utc`` for subreddit."""
+    if session is None:
+        return
 
     stmt = pg_insert(reddit_fetch_state).values(
         id=uuid.uuid4(),
