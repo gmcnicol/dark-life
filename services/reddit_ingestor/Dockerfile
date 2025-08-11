@@ -1,19 +1,29 @@
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+# optional build tools (safer for wheels/source builds)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-RUN pip install --no-cache-dir praw requests typer langdetect
+# dependencies first (cache layer)
+COPY services/reddit_ingestor/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY services/reddit_ingestor /app/services/reddit_ingestor
-COPY apps/api /app/apps/api
-COPY shared /app/shared
+# shared package for imports like "from shared.config import settings"
+COPY shared/ ./shared/
 
-ENV REDDIT_CLIENT_ID= \
-    REDDIT_CLIENT_SECRET= \
-    REDDIT_USER_AGENT=darklife/1.0 \
-    REDDIT_DEFAULT_SUBREDDITS=
+# service code
+COPY services/reddit_ingestor/ ./services/reddit_ingestor/
 
-ENTRYPOINT ["python", "services/reddit_ingestor/cli.py"]
-CMD ["incremental"]
+# if ingestor imports other repo code, copy here (uncomment if needed)
+# COPY apps/api/ ./apps/api/
+# COPY services/shared_lib/ ./services/shared_lib/
 
-HEALTHCHECK CMD python -c "exit(0)"
+ENTRYPOINT ["python", "-m", "services.reddit_ingestor.cli"]
+CMD ["--help"]
