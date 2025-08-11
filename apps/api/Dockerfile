@@ -4,6 +4,8 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    git \
+    cmake \
     ffmpeg \
     libmagic1 \
     curl \
