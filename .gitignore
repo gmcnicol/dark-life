@@ -221,3 +221,4 @@ output/manifest/*
 !output/manifest/.gitkeep
 render_queue/*
 !render_queue/.gitkeep
+.idea/
