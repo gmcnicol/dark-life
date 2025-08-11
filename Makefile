@@ -38,10 +38,10 @@ uploader:
 >$(COMPOSE) run --rm uploader
 
 ingest:
->$(COMPOSE) --profile ops run --rm --env-file .env reddit_ingestor incremental --subreddits $(SUBS)
+>$(COMPOSE) --profile ops run --rm reddit_ingestor incremental --subreddits $(SUBS)
 
 backfill:
->$(COMPOSE) --profile ops run --rm --env-file .env reddit_ingestor backfill --subreddits $(SUBS) --earliest $(EARLIEST)
+>$(COMPOSE) --profile ops run --rm reddit_ingestor backfill --subreddits $(SUBS) --earliest $(EARLIEST)
 
 rebuild:
 >$(COMPOSE) build --no-cache
