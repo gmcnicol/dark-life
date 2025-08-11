@@ -12,20 +12,17 @@ This module exposes a small Typer based CLI with three commands:
   entries.
 """
 
-from datetime import datetime, timezone
 from typing import List
 import os
 
 import typer
 from sqlalchemy import func, select
 
-from .backfill import orchestrate_backfill
+from .backfill import orchestrate_backfill, DEFAULT_BACKFILL_START
 from .incremental import fetch_incremental
 from .storage import reddit_posts, run_with_session
 
 app = typer.Typer(add_completion=False, help="Reddit ingestion commands")
-
-DEFAULT_BACKFILL_START = datetime(2023, 1, 1, tzinfo=timezone.utc)
 
 
 def _subreddits_from_env() -> List[str]:
@@ -46,12 +43,11 @@ def backfill() -> None:
     """Backfill historical posts for default subreddits."""
 
     subs = _subreddits_from_env()
-    earliest_ts = int(DEFAULT_BACKFILL_START.timestamp())
     for sub in subs:
         typer.echo(
             f"Backfilling {sub} starting from {DEFAULT_BACKFILL_START.date()}..."
         )
-        inserted = orchestrate_backfill(sub, earliest_target_utc=earliest_ts)
+        inserted = orchestrate_backfill(sub)
         typer.echo(f"Inserted {inserted} posts for r/{sub}")
 
 
