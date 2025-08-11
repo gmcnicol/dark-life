@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlmodel import Session, select
 from sqlalchemy import Table, Column, DateTime, Text, MetaData, func
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, insert as pg_insert
 
 from .db import get_session
-from .models import Job, Story
-from services.reddit_ingestor.storage import reddit_posts
+from .models import Job
 
 router = APIRouter(prefix="/admin/reddit", tags=["admin-reddit"])
 
@@ -59,8 +59,10 @@ class BackfillRequest(BaseModel):
 class IncrementalRequest(BaseModel):
     subreddits: Optional[List[str]] = None
 
-class PromoteRequest(BaseModel):
-    reddit_ids: List[str]
+class FetchStateUpdate(BaseModel):
+    subreddit: str
+    last_fullname: str
+    last_created_utc: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +122,33 @@ def fetch_state(
     return [dict(r._mapping) for r in rows]
 
 
+@router.post("/state")
+def upsert_state(
+    payload: FetchStateUpdate,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_token),
+) -> dict:
+    stmt = pg_insert(reddit_fetch_state).values(
+        id=uuid.uuid4(),
+        subreddit=payload.subreddit,
+        last_fullname=payload.last_fullname,
+        last_created_utc=payload.last_created_utc,
+        mode="incremental",
+        updated_at=func.now(),
+    ).on_conflict_do_update(
+        index_elements=[reddit_fetch_state.c.subreddit],
+        set_={
+            "last_fullname": payload.last_fullname,
+            "last_created_utc": payload.last_created_utc,
+            "mode": "incremental",
+            "updated_at": func.now(),
+        },
+    )
+    session.exec(stmt)
+    session.commit()
+    return {"status": "ok"}
+
+
 @router.get("/jobs", response_model=list[Job])
 def list_reddit_jobs(
     status: Optional[str] = None,
@@ -136,51 +165,6 @@ def list_reddit_jobs(
     return session.exec(stmt).all()
 
 
-@router.get("/posts")
-def list_posts(
-    subreddit: Optional[str] = None,
-    q: Optional[str] = None,
-    since: Optional[datetime] = None,
-    session: Session = Depends(get_session),
-    _: None = Depends(require_token),
-):
-    stmt = select(reddit_posts)
-    if subreddit:
-        stmt = stmt.where(reddit_posts.c.subreddit == subreddit)
-    if q:
-        stmt = stmt.where(reddit_posts.c.title.ilike(f"%{q}%"))
-    if since:
-        stmt = stmt.where(reddit_posts.c.created_utc >= since)
-    stmt = stmt.order_by(reddit_posts.c.created_utc.desc()).limit(100)
-    rows = session.exec(stmt).all()
-    return [dict(r._mapping) for r in rows]
-
-
-@router.post("/promote")
-def promote_posts(
-    req: PromoteRequest,
-    session: Session = Depends(get_session),
-    _: None = Depends(require_token),
-) -> dict:
-    created: List[int] = []
-    for rid in req.reddit_ids:
-        row = session.exec(
-            select(reddit_posts).where(reddit_posts.c.reddit_id == rid)
-        ).first()
-        if row:
-            payload = row._mapping
-            story = Story(
-                title=payload.get("title"),
-                subreddit=payload.get("subreddit"),
-                source_url=payload.get("url"),
-                body_md=payload.get("selftext"),
-                status="draft",
-            )
-            session.add(story)
-            session.commit()
-            session.refresh(story)
-            created.append(story.id)
-    return {"created_story_ids": created}
 
 
 __all__ = ["router"]

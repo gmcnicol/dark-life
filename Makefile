@@ -1,5 +1,5 @@
 .RECIPEPREFIX := >
-.PHONY: init sync test up down logs api web renderer uploader ingest backfill rebuild migrate smoke
+.PHONY: init sync test up down logs api web renderer uploader ingest rebuild migrate smoke
 
 VENV_DIR := .venv
 COMPOSE := docker compose -f infra/docker-compose.yml
