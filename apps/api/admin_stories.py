@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -76,7 +77,9 @@ def upsert_story(
     session.add(story)
     session.commit()
     session.refresh(story)
-    return JSONResponse(status_code=status.HTTP_201_CREATED, content=story.model_dump())
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED, content=jsonable_encoder(story)
+    )
 
 
 __all__ = ["router"]
