@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stories, nextStoryId, Story } from "../mock-data";
 
-export async function GET() {
-  const list = stories.map(({ id, title }) => ({ id, title }));
-  return NextResponse.json(list);
+const API_BASE_URL = process.env.API_BASE_URL || "";
+
+export async function GET(req: NextRequest) {
+  const url = `${API_BASE_URL}/api/stories${req.nextUrl.search}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  return new NextResponse(text, { status: res.status, headers: res.headers });
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const story: Story = {
-    id: nextStoryId(),
-    title: body.title ?? "Untitled story",
-    body_md: body.body_md ?? "",
-    status: "draft",
-    images: [],
-  };
-  stories.push(story);
-  return NextResponse.json(story, { status: 201 });
+  const body = await req.text();
+  const res = await fetch(`${API_BASE_URL}/api/stories`, {
+    method: "POST",
+    headers: {
+      ...(req.headers.get("content-type")
+        ? { "Content-Type": req.headers.get("content-type") as string }
+        : {}),
+    },
+    body,
+  });
+  const text = await res.text();
+  return new NextResponse(text, { status: res.status, headers: res.headers });
 }
