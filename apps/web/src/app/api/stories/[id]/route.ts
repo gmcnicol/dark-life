@@ -1,0 +1,38 @@
+import { NextResponse } from "next/server";
+import { stories } from "../../mock-data";
+
+export async function GET(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
+  const story = stories.find((s) => s.id === Number(params.id));
+  if (!story) {
+    return NextResponse.json({ message: "Not found" }, { status: 404 });
+  }
+  return NextResponse.json(story);
+}
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  const story = stories.find((s) => s.id === Number(params.id));
+  if (!story) {
+    return NextResponse.json({ message: "Not found" }, { status: 404 });
+  }
+  const patch = await req.json();
+  Object.assign(story, patch);
+  return NextResponse.json(story);
+}
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
+  const index = stories.findIndex((s) => s.id === Number(params.id));
+  if (index === -1) {
+    return NextResponse.json({ message: "Not found" }, { status: 404 });
+  }
+  stories.splice(index, 1);
+  return NextResponse.json({});
+}
