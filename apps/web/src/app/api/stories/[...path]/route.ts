@@ -10,7 +10,7 @@ async function handler(
   if (path.endsWith("/enqueue-render")) {
     path = path.replace(/\/enqueue-render$/, "/enqueue-series");
   }
-  const url = `${API_BASE_URL}/api/stories/${path}${req.nextUrl.search}`;
+  const url = `${API_BASE_URL}/stories/${path}${req.nextUrl.search}`;
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.text();
   const res = await fetch(url, {
     method: req.method,
