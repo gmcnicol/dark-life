@@ -10,6 +10,11 @@ from .incremental import fetch_incremental
 app = typer.Typer(add_completion=False, help="Reddit ingestion commands")
 
 
+@app.callback()
+def main() -> None:
+    """Reddit ingestion commands."""
+
+
 def _subreddits_from_env() -> List[str]:
     value = os.getenv("REDDIT_DEFAULT_SUBREDDITS", "")
     subs = [s.strip() for s in value.split(",") if s.strip()]
