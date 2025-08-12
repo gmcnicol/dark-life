@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { marked } from "marked";
@@ -38,8 +39,9 @@ type Toast = {
   linkText?: string;
 };
 
-export default function StoryEditorPage({ params }: any) {
-  const { id } = params as { id: string };
+export default function StoryEditorPage() {
+  const params = useParams<{ id: string }>();
+  const { id } = params;
   const [form, setForm] = useState<Story | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const isInitial = useRef(true);
