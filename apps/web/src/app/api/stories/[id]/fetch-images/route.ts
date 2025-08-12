@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
-import { stories, nextImageId } from "../../../../mock-data";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextRequest, NextResponse } from "next/server";
+import { stories, nextImageId } from "../../../mock-data";
 
 export async function POST(
-  _req: Request,
-  { params }: { params: { id: string } }
+  _req: NextRequest,
+  { params }: any
 ) {
   const story = stories.find((s) => s.id === Number(params.id));
   if (!story) {

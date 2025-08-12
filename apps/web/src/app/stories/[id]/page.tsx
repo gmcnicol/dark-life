@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
@@ -37,12 +38,8 @@ type Toast = {
   linkText?: string;
 };
 
-export default function StoryEditorPage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  const { id } = params;
+export default function StoryEditorPage({ params }: any) {
+  const { id } = params as { id: string };
   const [form, setForm] = useState<Story | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const isInitial = useRef(true);
@@ -228,14 +225,14 @@ export default function StoryEditorPage({
         <button
           className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50"
           onClick={() => splitMutation.mutate()}
-          disabled={splitMutation.isLoading}
+        disabled={splitMutation.isPending}
         >
           Split into parts
         </button>
         <button
           className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50"
           disabled={
-            form.status !== "approved" || selectedCount === 0 || enqueueMutation.isLoading
+            form.status !== "approved" || selectedCount === 0 || enqueueMutation.isPending
           }
           onClick={() => enqueueMutation.mutate()}
         >

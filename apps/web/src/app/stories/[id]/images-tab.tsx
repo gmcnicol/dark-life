@@ -96,12 +96,12 @@ export default function ImagesTab({ storyId }: { storyId: string }) {
       <button
         className="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50"
         onClick={() => fetchMutation.mutate()}
-        disabled={fetchMutation.isLoading}
+        disabled={fetchMutation.isPending}
       >
         Auto-fetch images
       </button>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        {(isLoading || fetchMutation.isLoading) &&
+        {(isLoading || fetchMutation.isPending) &&
           Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="h-40 bg-neutral-800 animate-pulse rounded" />
           ))}

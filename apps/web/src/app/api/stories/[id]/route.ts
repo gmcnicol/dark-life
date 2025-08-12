@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextRequest, NextResponse } from "next/server";
 import { stories } from "../../mock-data";
 
 export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } }
+  _req: NextRequest,
+  { params }: any
 ) {
   const story = stories.find((s) => s.id === Number(params.id));
   if (!story) {
@@ -13,8 +14,8 @@ export async function GET(
 }
 
 export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
+  req: NextRequest,
+  { params }: any
 ) {
   const story = stories.find((s) => s.id === Number(params.id));
   if (!story) {
@@ -26,8 +27,8 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: Request,
-  { params }: { params: { id: string } }
+  _req: NextRequest,
+  { params }: any
 ) {
   const index = stories.findIndex((s) => s.id === Number(params.id));
   if (index === -1) {
