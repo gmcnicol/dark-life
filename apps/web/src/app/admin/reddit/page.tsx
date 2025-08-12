@@ -2,9 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "";
-
 interface Job {
   id: number;
   subreddit: string;
@@ -38,14 +35,12 @@ export default function RedditAdminPage() {
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
 
-  const headers = { "X-Admin-Token": ADMIN_TOKEN };
-
   async function refresh() {
-    const s = await fetch(`${API_BASE}/api/admin/reddit/state`, { headers }).then((r) => r.json());
+    const s = await fetch(`/api/admin/reddit/state`).then((r) => r.json());
     setState(s);
-    const j = await fetch(`${API_BASE}/api/admin/reddit/jobs`, { headers }).then((r) => r.json());
+    const j = await fetch(`/api/admin/reddit/jobs`).then((r) => r.json());
     setJobs(j);
-    const p = await fetch(`${API_BASE}/api/admin/reddit/posts`, { headers }).then((r) => r.json());
+    const p = await fetch(`/api/admin/reddit/posts`).then((r) => r.json());
     setPosts(p);
   }
 
@@ -54,18 +49,18 @@ export default function RedditAdminPage() {
   }, []);
 
   async function runIncremental() {
-    await fetch(`${API_BASE}/api/admin/reddit/incremental`, {
+    await fetch(`/api/admin/reddit/incremental`, {
       method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subreddits: subs.split(",").map((s) => s.trim()).filter(Boolean) }),
     });
     refresh();
   }
 
   async function runBackfill() {
-    await fetch(`${API_BASE}/api/admin/reddit/backfill`, {
+    await fetch(`/api/admin/reddit/backfill`, {
       method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subreddits: subs.split(",").map((s) => s.trim()).filter(Boolean), earliest }),
     });
     refresh();
@@ -78,9 +73,9 @@ export default function RedditAdminPage() {
   async function promoteSelected() {
     const ids = Object.keys(selected).filter((k) => selected[k]);
     if (!ids.length) return;
-    await fetch(`${API_BASE}/api/admin/reddit/promote`, {
+    await fetch(`/api/admin/reddit/promote`, {
       method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reddit_ids: ids }),
     });
     refresh();

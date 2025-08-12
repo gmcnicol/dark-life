@@ -6,17 +6,16 @@ beforeEach(() => {
 });
 
 describe('apiFetch', () => {
-  it('prefixes base url', async () => {
+  it('prefixes /api', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ ok: true }),
     });
     const g = globalThis as unknown as { fetch: typeof fetch };
     g.fetch = mockFetch as typeof fetch;
-    process.env.NEXT_PUBLIC_API_BASE_URL = 'http://api';
 
     await apiFetch('/stories');
-    expect(mockFetch).toHaveBeenCalledWith('http://api/stories', undefined);
+    expect(mockFetch).toHaveBeenCalledWith('/api/stories', undefined);
   });
 
   it('throws on http error', async () => {
@@ -27,7 +26,6 @@ describe('apiFetch', () => {
     });
     const g = globalThis as unknown as { fetch: typeof fetch };
     g.fetch = mockFetch as typeof fetch;
-    process.env.NEXT_PUBLIC_API_BASE_URL = '';
 
     await expect(apiFetch('/fail')).rejects.toThrow('API request failed with 500');
   });
