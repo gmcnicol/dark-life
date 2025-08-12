@@ -44,7 +44,7 @@ rebuild:
 >$(COMPOSE) build --no-cache
 
 migrate:
->$(COMPOSE) run --rm api alembic -c /app/alembic.ini upgrade head
+>$(COMPOSE) run --rm api sh -lc 'cd apps/api && alembic -c ../../alembic.ini upgrade head'
 
 smoke:
 >API_BASE=http://localhost:8000 python scripts/smoke_e2e.py
