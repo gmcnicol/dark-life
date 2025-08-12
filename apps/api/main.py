@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from time import monotonic
 
 from .db import init_db
 from .stories import router as stories_router
@@ -13,10 +15,31 @@ from .reddit_admin import router as reddit_admin_router
 from .admin_stories import router as admin_stories_router
 
 
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("api")
 ready = False
 
 app = FastAPI(title="Dark Life API")
+
+
+class LogRequestsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = monotonic()
+        response = await call_next(request)
+        duration_ms = int((monotonic() - start) * 1000)
+        logger.info(
+            "request",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        return response
+
+
+app.add_middleware(LogRequestsMiddleware)
 app.include_router(stories_router)
 app.include_router(jobs_router)
 app.include_router(reddit_admin_router)
