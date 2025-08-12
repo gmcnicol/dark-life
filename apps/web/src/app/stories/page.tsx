@@ -33,13 +33,13 @@ export default function StoriesPage() {
       if (q) params.set("q", q);
       params.set("page", String(page));
       params.set("limit", String(limit));
-      return apiFetch<Story[]>(`/api/stories?${params.toString()}`);
+      return apiFetch<Story[]>(`/stories?${params.toString()}`);
     },
   });
 
   const createMutation = useMutation({
     mutationFn: () =>
-      apiFetch<Story>("/api/stories", {
+      apiFetch<Story>('/stories', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Untitled story" }),
@@ -54,7 +54,7 @@ export default function StoriesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
-      apiFetch(`/api/stories/${id}`, { method: "DELETE" }),
+      apiFetch(`/stories/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["stories"] });
       showToast({ type: "success", message: "Story deleted" });

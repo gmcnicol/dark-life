@@ -1,6 +1,6 @@
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-  const res = await fetch(`${base}${path}`, init);
+  const url = path.startsWith("/") ? `/api${path}` : `/api/${path}`;
+  const res = await fetch(url, init);
   if (!res.ok) {
     throw new Error(`API request failed with ${res.status}`);
   }
