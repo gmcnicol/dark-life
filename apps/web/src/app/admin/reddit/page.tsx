@@ -10,6 +10,9 @@ interface Job {
   subreddit: string;
   kind: string;
   status: string;
+  payload?: {
+    subreddit?: string;
+  };
 }
 
 interface StateRow {
@@ -129,7 +132,7 @@ export default function RedditAdminPage() {
           {jobs.map((job) => (
             <tr key={job.id}>
               <td>{job.id}</td>
-              <td>{(job.payload as any)?.subreddit ?? job.subreddit}</td>
+              <td>{job.payload?.subreddit ?? job.subreddit}</td>
               <td>{job.kind}</td>
               <td>{job.status}</td>
             </tr>
