@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { stories, nextStoryId, Story } from "../mock-data";
 
 export async function GET() {
@@ -6,7 +6,7 @@ export async function GET() {
   return NextResponse.json(list);
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const body = await req.json();
   const story: Story = {
     id: nextStoryId(),

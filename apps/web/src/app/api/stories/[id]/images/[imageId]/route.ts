@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextRequest, NextResponse } from "next/server";
 import { stories } from "../../../../mock-data";
 
 export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string; imageId: string } }
+  req: NextRequest,
+  { params }: any
 ) {
   const story = stories.find((s) => s.id === Number(params.id));
   if (!story) {
