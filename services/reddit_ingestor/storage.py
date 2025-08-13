@@ -42,8 +42,8 @@ def insert_post(payload: Dict[str, Any]) -> bool:
     }
 
     headers: Dict[str, str] = {}
-    if settings.ADMIN_API_TOKEN:
-        headers["Authorization"] = f"Bearer {settings.ADMIN_API_TOKEN}"
+    if settings.API_AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.API_AUTH_TOKEN}"
 
     resp = requests.post(
         f"{settings.API_BASE_URL.rstrip('/')}/admin/stories",

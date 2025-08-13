@@ -34,8 +34,8 @@ MIN_UPVOTES = int(os.getenv("REDDIT_MIN_UPVOTES", "0"))
 
 def _auth_headers() -> Dict[str, str]:
     headers: Dict[str, str] = {}
-    if settings.ADMIN_API_TOKEN:
-        headers["Authorization"] = f"Bearer {settings.ADMIN_API_TOKEN}"
+    if settings.API_AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.API_AUTH_TOKEN}"
     return headers
 
 
