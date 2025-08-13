@@ -21,7 +21,7 @@ import subprocess
 from pathlib import Path
 
 from shared.config import settings
-from shared.logging import log_error, log_info
+from shared.logging import log_debug, log_error, log_info
 
 IMAGE_DURATION = 5
 TRANSITION_DURATION = 1
@@ -81,7 +81,12 @@ def _settings_path(name: str, fallback: Path) -> Path:
     return Path(getattr(settings, name, fallback))
 
 
-def preflight(job_id: str, frames_dir: Path) -> tuple[list[Path], Path]:
+def preflight(
+    job_id: str,
+    frames_dir: Path,
+    story_id: str | None = None,
+    part_id: str | None = None,
+) -> tuple[list[Path], Path]:
     """Validate inputs and choose a music track."""
 
     if not frames_dir.is_dir():
@@ -101,6 +106,8 @@ def preflight(job_id: str, frames_dir: Path) -> tuple[list[Path], Path]:
     log_info(
         "preflight",
         job_id=job_id,
+        story_id=story_id,
+        part_id=part_id,
         frames_dir=str(frames_dir),
         frame_count=len(frames),
         music_dir=str(music_dir),
@@ -180,7 +187,7 @@ def render(
 ) -> dict[str, object]:
     """Render the slideshow and return artifact metadata."""
 
-    frames, track = preflight(job_id, frames_dir)
+    frames, track = preflight(job_id, frames_dir, story_id, part_id)
 
     tmp_root = _settings_path("TMP_DIR", settings.TMP_DIR)
     out_dir = _settings_path("OUTPUT_DIR", settings.OUTPUT_DIR)
@@ -189,15 +196,17 @@ def render(
     tmp_path = job_tmp / f"{story_id}_{part_id}.mp4"
 
     cmd = build_ffmpeg_cmd(frames_dir, track, tmp_path, fps=fps, audio_bitrate=audio_bitrate)
-    if debug:
-        log_info("ffmpeg_cmd", job_id=job_id, argv=cmd)
+    log_debug("ffmpeg_cmd", job_id=job_id, argv=cmd)
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode != 0:
         snippet = proc.stderr.decode(errors="ignore")[-400:]
         log_error(
-            "ffmpeg_failed",
+            "error",
             job_id=job_id,
+            story_id=story_id,
+            part_id=part_id,
             exit_code=proc.returncode,
+            error_class="FFmpegError",
             stderr_snippet=snippet,
         )
         raise RuntimeError("ffmpeg failed")
@@ -250,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         log_error(
             "error",
             job_id=args.job_id,
+            story_id=args.story_id,
+            part_id=args.part_id,
             error_class=exc.__class__.__name__,
             error_message=str(exc),
         )

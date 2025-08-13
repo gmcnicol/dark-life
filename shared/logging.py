@@ -20,3 +20,8 @@ def log_info(event: str, **fields: object) -> None:
 def log_error(event: str, **fields: object) -> None:
     """Emit an error JSON log line."""
     _log(logging.ERROR, event, **fields)
+
+
+def log_debug(event: str, **fields: object) -> None:
+    """Emit a debug-level JSON log line."""
+    _log(logging.DEBUG, event, **fields)
