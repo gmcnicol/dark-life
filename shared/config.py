@@ -68,6 +68,22 @@ class Settings(BaseSettings):
         default="",
         description="Bearer token for privileged API access",
     )
+    POLL_INTERVAL_MS: int = Field(
+        default=5000,
+        description="Polling interval for renderer worker in milliseconds",
+    )
+    MAX_CONCURRENT: int = Field(
+        default=1,
+        description="Maximum concurrent render jobs",
+    )
+    MAX_CLAIM: int = Field(
+        default=1,
+        description="Maximum jobs to claim per poll",
+    )
+    LEASE_SECONDS: int = Field(
+        default=120,
+        description="Lease duration when claiming render jobs",
+    )
 
 
 settings = Settings()
