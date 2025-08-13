@@ -4,7 +4,16 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir faster-whisper pydub typer
+# Install required Python packages for the renderer service.
+# Include config dependencies (pydantic & pydantic-settings) and
+# networking library `requests` used by the poller.
+RUN pip install --no-cache-dir \
+    faster-whisper \
+    pydub \
+    typer \
+    requests \
+    pydantic \
+    pydantic-settings
 
 COPY services/renderer /app/services/renderer
 COPY apps/api /app/apps/api
