@@ -2,6 +2,8 @@
 
 Monorepo for automating short-form dark storytelling videos.
 
+The web app now includes a `/board` Kanban view with drag-and-drop status updates and global keyboard shortcuts (`g i` for inbox, `g b` for board, `/` to focus search).
+
 ## Local POC Runbook
 
 1. **Prereqs**

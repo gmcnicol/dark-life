@@ -7,7 +7,7 @@ describe("StorySchema", () => {
     expect(() => StorySchema.parse(data)).not.toThrow();
   });
   it("rejects invalid story", () => {
-    const data = { title: "t", status: "pending" } as any;
+    const data = { title: "t", status: "pending" } as unknown;
     expect(() => StorySchema.parse(data)).toThrow();
   });
 });

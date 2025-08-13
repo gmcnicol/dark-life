@@ -5,7 +5,7 @@ export interface JobData {
   status: string;
 }
 
-let jobs: JobData[] = [];
+const jobs: JobData[] = [];
 let nextId = 1;
 
 export function listJobs(story_id?: number): JobData[] {
