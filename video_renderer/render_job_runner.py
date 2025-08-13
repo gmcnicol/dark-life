@@ -5,31 +5,53 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+import time
 from typing import Any
 
 import httpx
 import typer
 
 from shared.config import settings
+from shared.logging import log_error, log_info
 from shared.types import RenderJob
 from . import create_slideshow, voiceover, whisper_subs
 
-logger = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False)
 
 
-async def _heartbeat(client: httpx.AsyncClient, job_id: str, interval: float) -> None:
+async def _heartbeat(
+    client: httpx.AsyncClient,
+    job_id: str,
+    story_id: str | None,
+    part_id: str | None,
+    interval: float,
+) -> None:
     """Send periodic heartbeats for ``job_id`` until cancelled."""
 
+    start = time.monotonic()
     try:
         while True:
             await asyncio.sleep(interval)
             await client.post(f"/api/render-jobs/{job_id}/heartbeat")
+            elapsed = int(time.monotonic() - start)
+            log_info(
+                "rendering",
+                job_id=job_id,
+                story_id=story_id,
+                part_id=part_id,
+                elapsed_sec=elapsed,
+            )
     except asyncio.CancelledError:  # pragma: no cover - cancelled when job ends
         pass
-    except Exception:  # pragma: no cover - best effort heartbeat
-        logger.exception("heartbeat failed for %s", job_id)
+    except Exception as exc:  # pragma: no cover - best effort heartbeat
+        log_error(
+            "error",
+            job_id=job_id,
+            story_id=story_id,
+            part_id=part_id,
+            error_class=exc.__class__.__name__,
+            error_message=str(exc),
+        )
 
 
 async def _process_api_job(job: dict[str, Any]) -> None:
@@ -46,8 +68,14 @@ def _process_job(job: RenderJob) -> bool:
             input_dir=settings.STORIES_DIR,
             output_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
         )
-    except Exception:
-        logger.exception("Voiceover generation failed for %s", story_id)
+    except Exception as exc:
+        log_error(
+            "error",
+            job_id=story_id,
+            story_id=story_id,
+            error_class=exc.__class__.__name__,
+            error_message=str(exc),
+        )
         return False
 
     try:
@@ -55,8 +83,14 @@ def _process_job(job: RenderJob) -> bool:
             input_dir=settings.CONTENT_DIR / "audio" / "voiceovers",
             output_dir=settings.CONTENT_DIR / "subtitles",
         )
-    except Exception:
-        logger.exception("Subtitle creation failed for %s", story_id)
+    except Exception as exc:
+        log_error(
+            "error",
+            job_id=story_id,
+            story_id=story_id,
+            error_class=exc.__class__.__name__,
+            error_message=str(exc),
+        )
         return False
 
     try:
@@ -68,8 +102,14 @@ def _process_job(job: RenderJob) -> bool:
                 str(settings.CONTENT_DIR / "subtitles"),
             ]
         )
-    except Exception:
-        logger.exception("Slideshow rendering failed for %s", story_id)
+    except Exception as exc:
+        log_error(
+            "error",
+            job_id=story_id,
+            story_id=story_id,
+            error_class=exc.__class__.__name__,
+            error_message=str(exc),
+        )
         return False
 
     settings.MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
@@ -88,12 +128,17 @@ async def _run_job(
 
     async with sem:
         if isinstance(job, RenderJob):
-            job_id = job.story_path.stem
+            job_id = story_id = job.story_path.stem
+            part_id = None
             lease_sec = settings.LEASE_SECONDS
         else:
             job_id = str(job.get("id"))
+            story_id = job.get("story_id")
+            part_id = job.get("part_id")
             lease_sec = int(job.get("lease_seconds", settings.LEASE_SECONDS))
-        hb_task = asyncio.create_task(_heartbeat(client, job_id, max(lease_sec / 2, 5)))
+        hb_task = asyncio.create_task(
+            _heartbeat(client, job_id, story_id, part_id, max(lease_sec / 2, 5))
+        )
         try:
             await client.post(
                 f"/api/render-jobs/{job_id}/status", json={"status": "rendering"}
@@ -115,6 +160,14 @@ async def _run_job(
                 f"/api/render-jobs/{job_id}/status",
                 json={"status": "errored", "error_message": str(exc)},
             )
+            log_error(
+                "error",
+                job_id=job_id,
+                story_id=story_id,
+                part_id=part_id,
+                error_class=exc.__class__.__name__,
+                error_message=str(exc),
+            )
         finally:
             hb_task.cancel()
 
@@ -124,6 +177,16 @@ async def _poll_loop() -> None:
 
     headers = {"Authorization": f"Bearer {settings.ADMIN_API_TOKEN}"}
     sem = asyncio.Semaphore(settings.MAX_CONCURRENT)
+    log_info(
+        "start",
+        poll_interval_ms=settings.POLL_INTERVAL_MS,
+        max_concurrent=settings.MAX_CONCURRENT,
+        lease_seconds=settings.LEASE_SECONDS,
+        api_base=settings.API_BASE_URL,
+        content_dir=str(settings.CONTENT_DIR),
+        music_dir=str(settings.CONTENT_DIR / "audio" / "music"),
+        output_dir=str(settings.OUTPUT_DIR),
+    )
     async with httpx.AsyncClient(
         base_url=settings.API_BASE_URL, headers=headers, timeout=30.0
     ) as client:
@@ -136,9 +199,7 @@ async def _poll_loop() -> None:
                 resp.raise_for_status()
                 jobs = resp.json()
                 queue_depth = len(jobs)
-                logger.info(
-                    json.dumps({"event": "poll", "queue_depth": queue_depth})
-                )
+                log_info("poll", queue_depth=queue_depth)
                 for job in jobs:
                     job_id = str(job.get("id"))
                     try:
@@ -147,25 +208,30 @@ async def _poll_loop() -> None:
                             json={"lease_seconds": settings.LEASE_SECONDS},
                         )
                         claim_resp.raise_for_status()
-                        logger.info(
-                            json.dumps(
-                                {
-                                    "event": "claim",
-                                    "job_id": job_id,
-                                    "story_id": job.get("story_id"),
-                                    "part_id": job.get("part_id"),
-                                    "lease_sec": job.get(
-                                        "lease_seconds", settings.LEASE_SECONDS
-                                    ),
-                                    "queue_depth": queue_depth,
-                                }
-                            )
+                        log_info(
+                            "claim",
+                            job_id=job_id,
+                            story_id=job.get("story_id"),
+                            part_id=job.get("part_id"),
+                            lease_sec=job.get("lease_seconds", settings.LEASE_SECONDS),
+                            queue_depth=queue_depth,
                         )
                         asyncio.create_task(_run_job(client, job, sem))
-                    except Exception:  # pragma: no cover - claim failure
-                        logger.exception("claim failed for %s", job_id)
-            except Exception:  # pragma: no cover - poll failure
-                logger.exception("poll failed")
+                    except Exception as exc:  # pragma: no cover - claim failure
+                        log_error(
+                            "error",
+                            job_id=job_id,
+                            story_id=job.get("story_id"),
+                            part_id=job.get("part_id"),
+                            error_class=exc.__class__.__name__,
+                            error_message=str(exc),
+                        )
+            except Exception as exc:  # pragma: no cover - poll failure
+                log_error(
+                    "error",
+                    error_class=exc.__class__.__name__,
+                    error_message=str(exc),
+                )
 
             await asyncio.sleep(settings.POLL_INTERVAL_MS / 1000)
 
