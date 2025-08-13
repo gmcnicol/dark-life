@@ -7,7 +7,13 @@ export interface StoryData {
 
 let stories: StoryData[] = [
   { id: 1, title: "First story", body_md: "Hello", status: "pending" },
-  { id: 2, title: "Second story", body_md: "World", status: "pending" },
+  {
+    id: 2,
+    title: "Second story",
+    body_md:
+      "This is the first sentence. Here is the second one. And finally the third.",
+    status: "pending",
+  },
 ];
 
 export function listStories(): StoryData[] {
