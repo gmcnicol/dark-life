@@ -1,10 +1,16 @@
 import pytest
 from pathlib import Path
+import types
 
+import pytest
+from pathlib import Path
+
+import video_renderer.create_slideshow as cs
 from video_renderer.create_slideshow import (
     build_video_filters,
     IMAGE_DURATION,
     TRANSITION_DURATION,
+    preflight,
 )
 
 
@@ -53,3 +59,34 @@ def test_build_video_filters(dark_overlay, zoom, subtitle, tmp_path):
     expected, expected_label = expected_filters(subtitle_path, dark_overlay, zoom)
     assert filters == expected
     assert label == expected_label
+
+
+def test_preflight_selects_first_track(tmp_path, monkeypatch):
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    (frames_dir / "f1.png").write_bytes(b"x")
+
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    (music_dir / "b.mp3").write_bytes(b"x")
+    (music_dir / "a.mp3").write_bytes(b"x")
+
+    dummy = types.SimpleNamespace(MUSIC_DIR=music_dir, CONTENT_DIR=tmp_path)
+    monkeypatch.setattr(cs, "settings", dummy)
+
+    frames, track = preflight("job1", frames_dir)
+    assert len(frames) == 1
+    assert track.name == "a.mp3"
+
+
+def test_preflight_missing_frames(tmp_path, monkeypatch):
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    (music_dir / "a.mp3").write_bytes(b"x")
+    dummy = types.SimpleNamespace(MUSIC_DIR=music_dir, CONTENT_DIR=tmp_path)
+    monkeypatch.setattr(cs, "settings", dummy)
+
+    with pytest.raises(FileNotFoundError):
+        preflight("job1", frames_dir)
