@@ -1,232 +1,189 @@
-# AGENTS.md — Dark Life (Phase: Database & Ingestion Enablement)
+# AGENTS.md — Renderer Service (API Polling → Render → Output)
 
-This phase ensures:
-1) The API applies Alembic migrations automatically on startup (zero schema drift).
-2) The Reddit ingestion service reliably and idempotently inserts stories into the database.
+Weapons-grade production-ready renderer spec.  
+Polling is to the API, not the DB directly.  
+Plain text for copy-paste.
 
----
-
+================================================================================
 ## Goals
+- Deterministic renders with background music from `/content/audio/music`.
+- Clear, structured logs at each stage: API poll → claim → preflight → render → write → API status update.
+- Fail fast on misconfig (paths, missing frames/audio) with actionable errors.
+- Zero-secret leakage; safe to run under docker compose locally and in production.
 
-- **Zero-drift schema:** API only becomes *ready* after `alembic upgrade head` succeeds.
-- **Idempotent ingestion:** Dedupe on `(source, external_id)`; upsert on conflict.
-- **Observable ops:** Structured logs, health/readiness gating, simple runbooks and alerts.
+================================================================================
+## Agents
 
----
-
-## Components (Agents)
-
-### 1) API Service (Migration Executor)
-**Purpose:** Start with the latest DB schema and expose admin endpoints used by ingestors.
-
-**Responsibilities**
-- Read DB URL from environment and run `alembic upgrade head` *before* starting the app server.
-- Exit non-zero on migration failure (fail fast).
-- Expose protected admin endpoints used for ingestion (e.g. `POST /admin/stories`).
-- Report **readiness** only after migrations succeed and the HTTP server is accepting requests.
-
-**Key Environment**
-- `DATABASE_URL` — e.g. `postgresql+psycopg://user:pass@postgres:5432/darklife`
-- `ADMIN_API_TOKEN` — bearer token for admin/ingestion endpoints
-- `PORT` (optional) — default `8000`
-
-**Entrypoint (reference)**
-    #!/usr/bin/env sh
-    set -euo pipefail
-    echo "[api] running alembic upgrade head..."
-    alembic upgrade head
-    echo "[api] starting server..."
-    exec uvicorn apps.api.main:app --host 0.0.0.0 --port "${PORT:-8000}"
-
-**Health / Readiness**
-- `/healthz`: returns 200 when the process is up.
-- `/readyz`: returns 200 **only after** migrations have succeeded and the server is ready to serve traffic.
-- Compose should gate API startup on Postgres health, then consumers (e.g., ingestor) can depend on API readiness.
-
-**Compose hints**
-    services:
-      postgres:
-        healthcheck:
-          test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-          interval: 5s
-          timeout: 5s
-          retries: 20
-
-      api:
-        depends_on:
-          postgres:
-            condition: service_healthy
-
-**Failure modes**
-- Migration error → container exits non-zero → no ready signal → upstream services will not start or will retry.
-- Missing `DATABASE_URL` → immediate failure (log and exit).
-- Admin endpoint disabled/missing token → ingestor will 401 and back off (see ingestor retries).
-
----
-
-### 2) Reddit Ingestor
-**Purpose:** Fetch Reddit posts and persist them via the API (preferred) or directly to DB (fallback), idempotently.
+### 1) Renderer Worker (API Poller)
+**Objective:** Poll the API for pending jobs, claim them atomically, and dispatch to the slideshow renderer.
 
 **Responsibilities**
-- Fetch newest posts for configured subreddits with bounded pagination.
-- Transform each post into `StoryIn` and send to API.
-- Ensure idempotency via `(source, external_id)`; on conflict, update mutable fields (title, text, url, tags).
-- Support **one-shot** (backfill) and **daemon** (continuous) modes.
-- Emit structured JSON logs and simple counters (ingested, upserts, duplicates, errors).
+- Poll API endpoint at `POLL_INTERVAL_MS` with jitter; log `queue_depth` (from API response).
+- API endpoint: `GET /api/render-jobs?status=queued&limit=MAX_CLAIM` returns claim tokens.
+- Claim job via `POST /api/render-jobs/{id}/claim` (returns lease expiry); log `{job_id, story_id, part_id, lease_sec}`.
+- Enforce concurrency via semaphore (`MAX_CONCURRENT`).
+- Heartbeat logs while a job is running; extend lease via `POST /api/render-jobs/{id}/heartbeat`.
+- Retry policy with exponential backoff on HTTP 5xx or network errors; no retry on 4xx except 409 (conflict).
 
-**Key Environment**
-- `REDDIT_CLIENT_ID`
-- `REDDIT_CLIENT_SECRET`
-- `REDDIT_USER_AGENT`
-- `API_BASE_URL` (e.g. `http://api:8000`)
-- `ADMIN_API_TOKEN`
-- `MODE` — `once` | `daemon`
-- `SUBREDDITS` — comma-separated list (e.g., `nosleep,letsnotmeet`)
-- `SINCE_EPOCH` (optional for backfill start)
-- `POLL_INTERVAL_SECONDS` (daemon mode; default 300)
+**Inputs**
+- API base URL + auth token.
+- Config/env: `POLL_INTERVAL_MS`, `MAX_CONCURRENT`, `LEASE_SECONDS`.
+- Paths: `/content`, `/output`, `/tmp/renderer`.
 
-**Data Contract**
-- `StoryIn`:
-  - `external_id: str` (Reddit link/id)
-  - `source: str` (constant `"reddit"`)
-  - `title: str`
-  - `author: str | null`
-  - `created_utc: int`
-  - `text: str | null`
-  - `url: str | null`
-  - `nsfw: bool | null`
-  - `flair: str | null`
-  - `tags: list[str] | null`
-
-**API Contract (preferred path)**
-- `POST /admin/stories` (Bearer `ADMIN_API_TOKEN`)
-  - Body: `StoryIn`
-  - 201 on insert; 200 on upsert/update; 409/422 with error body captured to logs/dead-letter.
-
-**Idempotency**
-- DB uniqueness constraint on `(source, external_id)`.
-- On conflict: update text/title/url/tags/flair/nsfw; never change `created_utc`.
-
-**Rate limits & retry**
-- Respect Reddit API limits and backoff headers.
-- Retries: 3 attempts with exponential backoff on 429/5xx.
-- Permanent 4xx (except 409/422) → skip and log error.
-
-**Modes**
-- `MODE=once`: run bounded backfill; exit 0 when done.
-- `MODE=daemon`: loop forever:
-  - poll window (e.g., past N minutes) with jitter,
-  - update checkpoint per subreddit (`last_seen_created_utc`),
-  - sleep `POLL_INTERVAL_SECONDS`.
-
-**Compose hints**
-    services:
-      reddit_ingestor:
-        profiles: ["ops"]
-        depends_on:
-          api:
-            condition: service_started
-        environment:
-          MODE: "daemon"
-          SUBREDDITS: "nosleep,letsnotmeet"
-          POLL_INTERVAL_SECONDS: "300"
-
-**Exit codes**
-- 0: success / normal exit (e.g., `MODE=once` completed).
-- 10: input/config error (missing env, invalid subreddit list).
-- 20: upstream/API unavailable after max retries.
-- 30: validation error persisted beyond retries (record skipped).
+**Outputs**
+- Job status transitions via API calls: `queued → claimed → rendering → rendered|errored`.
+- Per-job structured logs (JSON).
 
 ---
 
+### 2) Slideshow Renderer
+**Objective:** Create a video from prepared frames and background music.
+
+**Responsibilities**
+- Preflight: validate frames dir non-empty; choose music track deterministically; ffprobe both.
+- Build ffmpeg command with explicit stream mapping and `-shortest`.
+- Render to a temp file, then atomic rename to `/output/<storyId>_<partIndex>.mp4`.
+- Return artifact metadata (size, duration, selected audio).
+
+**Inputs**
+- Frames directory for the job (e.g., `/tmp/renderer/<job_id>/frames`).
+- Music directory: `/content/audio/music` (absolute).
+- Render settings: fps, codecs, bitrate.
+
+**Outputs**
+- MP4 under `/output/…`.
+- Metadata for API update.
+- Detailed logs + ffmpeg stderr snippet on failure.
+
+---
+
+### 3) Shared Config & Logging
+**Objective:** Provide absolute paths and structured logging helpers so all agents behave consistently.
+
+**Responsibilities**
+- Constants:
+  - `CONTENT_DIR=/content`
+  - `MUSIC_DIR=/content/audio/music`
+  - `OUTPUT_DIR=/output`
+  - `TMP_DIR=/tmp/renderer`
+- Logging helpers: `log_info(event, **fields)`, `log_error(event, **fields)`, JSON formatter.
+- CLI flags: `--log-level`, `--json-logs`, `--debug`.
+
+================================================================================
+## Interfaces & Contracts
+
+### API endpoints
+- `GET /api/render-jobs?status=queued&limit=N` → list of `{id, story_id, part_id, claim_url, lease_seconds}`.
+- `POST /api/render-jobs/{id}/claim` → `{lease_expires_at}`.
+- `POST /api/render-jobs/{id}/heartbeat` → 200 OK if extended.
+- `POST /api/render-jobs/{id}/status` with body:
+  - `status`: `rendering|rendered|errored`
+  - `artifact_path?`, `bytes?`, `duration_ms?`
+  - `error_class?`, `error_message?`, `stderr_snippet?`
+
+### Renderer inputs
+- `frames_dir`: must exist and contain at least one `*.png`.
+- `music_dir`: must contain at least one `.mp3` (default pick: first sorted).
+- `fps`: default 30.
+- `audio_bitrate`: default 192k.
+
+### Renderer outputs
+- `artifact_path`: `/output/<storyId>_<partIndex>_<ts>.mp4` (atomic rename).
+- `bytes`, `duration_ms`, `audio_track`: logged + sent to API.
+
+================================================================================
+## Logging Specification
+
+- All logs are single-line JSON in INFO level unless noted.
+- Required fields: `service="renderer"`, `event`, `job_id`, `story_id`, `part_id` (when known).
+- Timestamps from logger, not manual.
+
+**Startup**
+`{"service":"renderer","event":"start","poll_interval_ms":5000,"max_concurrent":2,"lease_seconds":120,"api_base":"https://api.example.com","content_dir":"/content","music_dir":"/content/audio/music","output_dir":"/output"}`
+
+**Poll tick**
+`{"service":"renderer","event":"poll","queue_depth":3}`
+
+**Claim**
+`{"service":"renderer","event":"claim","job_id":"J123","story_id":"S45","part_id":"P2","lease_expires_at":"...","attempt":1}`
+
+**Preflight**
+`{"service":"renderer","event":"preflight","job_id":"J123","frames_dir":"/tmp/renderer/J123/frames","frame_count":450,"music_dir":"/content/audio/music","chosen_track":"background.mp3"}`
+
+**ffmpeg command (DEBUG only)**
+`{"service":"renderer","event":"ffmpeg_cmd","argv":["ffmpeg","-y","-framerate","30","-pattern_type","glob","-i","/tmp/renderer/J123/frames/*.png","-i","/content/audio/music/background.mp3","-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-shortest","-map","0:v:0","-map","1:a:0","/output/S45_P2.mp4"]}`
+
+**Heartbeat (every 5–10s during render)**
+`{"service":"renderer","event":"rendering","job_id":"J123","elapsed_sec":42}`
+
+**Success**
+`{"service":"renderer","event":"done","job_id":"J123","path":"/output/S45_P2.mp4","bytes":8345234,"duration_ms":59874}`
+
+**Error**
+`{"service":"renderer","event":"error","job_id":"J123","exit_code":1,"error_class":"FFmpegError","stderr_snippet":"...muxer error...","ffreport":"/tmp/ffreport-J123.log"}`
+
+================================================================================
+## Operational Settings (env/CLI)
+
+- `API_BASE_URL` (required)
+- `API_AUTH_TOKEN` (required)
+- `POLL_INTERVAL_MS` (default 5000)
+- `MAX_CONCURRENT` (default 1 or 2)
+- `LEASE_SECONDS` (default 120)
+- `MUSIC_DIR=/content/audio/music`
+- `CONTENT_DIR=/content`
+- `OUTPUT_DIR=/output`
+- `TMP_DIR=/tmp/renderer`
+- Flags: `--log-level info|debug`, `--json-logs`, `--debug`
+
+Docker Compose (renderer service) should ensure:
+- `PYTHONUNBUFFERED=1`
+- Command calls Python unbuffered and passes absolute paths:
+  `python -u video_renderer/create_slideshow.py --music-dir /content/audio/music --stories-path /content/stories --output /output`
+
+================================================================================
+## Failure Policy
+
+- **Preflight failure** (no frames/audio): mark `errored` via API with reason; do not call ffmpeg.
+- **ffmpeg failure**: capture `stderr` + exit code, mark `errored` via API; retry up to `MAX_RETRIES` with backoff for transient codes.
+- **Lease expired**: if a render exceeds lease, renew lease via heartbeat or abort gracefully and mark `errored` via API.
+- **Timeout**: kill ffmpeg after `JOB_TIMEOUT_SEC`; mark `errored` with `timeout=true`.
+
+================================================================================
 ## Runbooks
 
-### First-time setup
-1. Ensure Postgres is reachable and empty or at expected baseline.
-2. Set `DATABASE_URL` in API env and `ADMIN_API_TOKEN`.
-3. Boot API container; confirm:
-   - logs show `alembic upgrade head` succeeded,
-   - `/readyz` returns 200.
-4. Hit admin list endpoint (if available) to verify auth path.
+### A) Fresh run
+1. `docker compose -f infra/docker-compose.yml up --build renderer`
+2. Follow logs: `docker compose -f infra/docker-compose.yml logs -f --tail=0 renderer`
+3. Expect `start` → `poll` → (maybe `claim`) → `preflight` → `rendering` → `done`.
 
-### Local development
-- Create a migration:
-    docker compose -f infra/docker-compose.yml run --rm api sh -lc 'cd apps/api && alembic revision --autogenerate -m "your message"'
-- Apply migrations (happens automatically on start); to force manually:
-    docker compose -f infra/docker-compose.yml run --rm api sh -lc 'cd apps/api && alembic upgrade head'
+### B) No output showing
+- Ensure unbuffered: `PYTHONUNBUFFERED=1` and `python -u`.
+- Run directly:
 
-### Backfill (one-shot)
-- Run ingestor with a start point:
-    MODE=once SUBREDDITS="nosleep" SINCE_EPOCH=1700000000 docker compose --profile ops up reddit_ingestor --build
-- Verify counts in DB/API; re-run with adjusted `SINCE_EPOCH` as needed.
+docker compose -f infra/docker-compose.yml run –rm –no-deps renderer 
+python -u video_renderer/create_slideshow.py 
+–stories-path /content/stories 
+–output /output 
+–music-dir /content/audio/music
 
-### Continuous ingest
-- Run with:
-    MODE=daemon SUBREDDITS="nosleep,letsnotmeet" POLL_INTERVAL_SECONDS=300 docker compose --profile ops up reddit_ingestor -d
-- Monitor logs for upserts/duplicates; inspect checkpoints.
+- If still silent: add `--debug` and inspect FFREPORT path in logs.
 
-### After schema change
-1. Create migration; merge conflicts if multiple heads arise.
-2. Rebuild and restart API. Readiness will gate until migrations succeed.
-3. Re-run ingestor (`once` for backfill of new fields or `daemon` to resume).
+### C) Audio missing
+- Verify path: `ls -l /content/audio/music`
+- Preflight logs must show `chosen_track`.
+- If empty dir, mount host `./content` into `/content` in compose.
+- If multiple tracks: default select first sorted; set `--music-select=named:background.mp3` if supported.
 
-### Disaster recovery
-- If API fails to migrate:
-  - Inspect logs for SQL errors,
-  - Roll forward with a fix migration, or roll back to prior revision,
-  - Rebuild/restart until `/readyz` is 200.
-- If ingestor hot-loops on bad data:
-  - Confirm 4xx vs 5xx,
-  - Quarantine the record (dead-letter),
-  - Patch transformation or server-side validation; redeploy.
+### D) Disk/space issues
+- Preflight log `df -h` when `--debug` is on; refuse when `< 2GB` free.
+- Temp cleanup: on error/success remove `/tmp/renderer/<job_id>`.
 
----
-
-## Testing
-
-**Unit**
-- DTO validation for `StoryIn`.
-- Upsert builder (ensures correct ON CONFLICT behavior or API upsert semantics).
-- Reddit client pagination and backoff logic.
-
-**Integration**
-- Spin up Postgres + API.
-- Run `MODE=once` against a fixed subreddit sample (or mocked Reddit API).
-- Assert: row counts, dedupe behavior, and that re-runs do not increase totals.
-
----
-
-## Observability
-
-**Logs (JSON)**
-- API: `event="alembic_upgrade" status="start|ok|error" from_rev=... to_rev=...`
-- Ingestor: `event="ingest" subreddit=... inserted=... upserted=... duplicates=... errors=...`
-- Errors include `err_type`, `http_status`, and `external_id`.
-
-**Counters (suggested)**
-- `ingestor_posts_inserted_total`
-- `ingestor_posts_upserted_total`
-- `ingestor_errors_total`
-- `api_migration_runs_total{status="ok|error"}`
-
----
-
-## Security
-
-- Admin endpoints require `Authorization: Bearer ${ADMIN_API_TOKEN}`.
-- Tokens are not logged; redact secrets in logs.
-- Principle of least privilege on DB user used by API; ingestor should not have direct DB access in prod (API only).
-
----
-
-## Acceptance Criteria (for this phase)
-
-- API container exits non-zero if migrations fail; `/readyz` returns 200 only post-migration.
-- Fresh environment boot applies latest migrations with no manual step.
-- Ingestor can run `once` and `daemon` against at least one subreddit and:
-  - inserts new stories,
-  - upserts changed stories,
-  - skips duplicates without growth,
-  - survives transient 5xx/429 with backoff.
-- Logs clearly show counts and errors for both agents.
-
+================================================================================
+## Acceptance Criteria
+- Poll loop hits API and logs queue depth even when idle.
+- Absolute defaults used; `--music-dir /content/audio/music` not required.
+- Structured logs at every stage with `job_id/story_id/part_id`.
+- On failure, `stderr_snippet` is present and API updated to `errored`.
+- Output files atomically written to `/output` with non-zero size and audio stream present.
+- Heartbeats extend leases; no job lost to timeout without attempt to renew.
