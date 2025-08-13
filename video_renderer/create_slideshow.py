@@ -15,10 +15,13 @@ Only built-in Python modules are used and ``ffmpeg`` is invoked through
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import shlex
 import subprocess
 from pathlib import Path
+
+from shared.config import settings
 
 IMAGE_DURATION = 5
 TRANSITION_DURATION = 1
@@ -74,104 +77,183 @@ def build_video_filters(
     return filters, last
 
 
-def run_ffmpeg(cmd: list[str]) -> int:
-    """Run ffmpeg command and return its exit status."""
+def _settings_path(name: str, fallback: Path) -> Path:
+    return Path(getattr(settings, name, fallback))
 
-    logging.debug("Running ffmpeg: %s", " ".join(shlex.quote(c) for c in cmd))
+
+def log_info(event: str, **fields: object) -> None:
+    logging.info(json.dumps({"service": "renderer", "event": event, **fields}))
+
+
+def log_error(event: str, **fields: object) -> None:
+    logging.error(json.dumps({"service": "renderer", "event": event, **fields}))
+
+
+def preflight(job_id: str, frames_dir: Path) -> tuple[list[Path], Path]:
+    """Validate inputs and choose a music track."""
+
+    if not frames_dir.is_dir():
+        raise FileNotFoundError(f"frames directory not found: {frames_dir}")
+    frames = sorted(frames_dir.glob("*.png"))
+    if not frames:
+        raise FileNotFoundError(f"no frame images found in {frames_dir}")
+
+    music_dir = _settings_path("MUSIC_DIR", settings.CONTENT_DIR / "audio" / "music")
+    if not music_dir.is_dir():
+        raise FileNotFoundError(f"music directory not found: {music_dir}")
+    tracks = sorted(music_dir.glob("*.mp3"))
+    if not tracks:
+        raise FileNotFoundError(f"no .mp3 tracks in {music_dir}")
+    chosen = tracks[0]
+
+    log_info(
+        "preflight",
+        job_id=job_id,
+        frames_dir=str(frames_dir),
+        frame_count=len(frames),
+        music_dir=str(music_dir),
+        chosen_track=chosen.name,
+    )
+    return frames, chosen
+
+
+def build_ffmpeg_cmd(
+    frames_dir: Path,
+    audio_track: Path,
+    out_path: Path,
+    fps: int = 30,
+    audio_bitrate: str = "192k",
+) -> list[str]:
+    """Return the ffmpeg command for rendering."""
+
+    pattern = str(frames_dir / "*.png")
+    return [
+        "ffmpeg",
+        "-y",
+        "-framerate",
+        str(fps),
+        "-pattern_type",
+        "glob",
+        "-i",
+        pattern,
+        "-i",
+        str(audio_track),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        audio_bitrate,
+        "-shortest",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        str(out_path),
+    ]
+
+
+def _probe_duration_ms(path: Path) -> int:
+    """Return media duration in milliseconds using ffprobe."""
+
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+    return int(float(result.stdout.strip()) * 1000)
+
+
+def render(
+    job_id: str,
+    story_id: str,
+    part_id: str,
+    frames_dir: Path,
+    fps: int = 30,
+    audio_bitrate: str = "192k",
+) -> dict[str, object]:
+    """Render the slideshow and return artifact metadata."""
+
+    frames, track = preflight(job_id, frames_dir)
+
+    tmp_root = _settings_path("TMP_DIR", Path("/tmp/renderer"))
+    out_dir = _settings_path("OUTPUT_DIR", settings.OUTPUT_DIR)
+    job_tmp = tmp_root / job_id
+    job_tmp.mkdir(parents=True, exist_ok=True)
+    tmp_path = job_tmp / f"{story_id}_{part_id}.mp4"
+
+    cmd = build_ffmpeg_cmd(frames_dir, track, tmp_path, fps=fps, audio_bitrate=audio_bitrate)
+    log_info("ffmpeg_cmd", job_id=job_id, argv=cmd)
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode != 0:
-        logging.error("ffmpeg failed: %s", proc.stderr.decode(errors="ignore"))
-    return proc.returncode
+        snippet = proc.stderr.decode(errors="ignore")[-400:]
+        log_error(
+            "ffmpeg_failed",
+            job_id=job_id,
+            exit_code=proc.returncode,
+            stderr_snippet=snippet,
+        )
+        raise RuntimeError("ffmpeg failed")
+
+    final_path = out_dir / f"{story_id}_{part_id}.mp4"
+    tmp_path.replace(final_path)
+
+    duration_ms = _probe_duration_ms(final_path)
+    size = final_path.stat().st_size
+    metadata = {
+        "bytes": size,
+        "duration_ms": duration_ms,
+        "audio_track": track.name,
+        "path": str(final_path),
+    }
+    log_info("done", job_id=job_id, story_id=story_id, part_id=part_id, **metadata)
+    return metadata
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Create a video slideshow")
-    parser.add_argument("--story_id", required=True, help="Story identifier")
-    parser.add_argument(
-        "--visuals-dir", type=Path, default=Path("content/visuals"), help="Image directory"
-    )
-    parser.add_argument(
-        "--voice-dir", type=Path, default=Path("content/audio/voiceovers"), help="Voiceover directory"
-    )
-    parser.add_argument(
-        "--music-dir", type=Path, default=Path("content/audio/music"), help="Background music directory"
-    )
-    parser.add_argument(
-        "--subtitles-dir", type=Path, default=Path("content/subtitles"), help="Subtitle directory"
-    )
-    parser.add_argument(
-        "--output-dir", type=Path, default=Path("output/videos"), help="Output directory"
-    )
-    parser.add_argument("--dark-overlay", action="store_true", help="Apply dark overlay")
-    parser.add_argument("--zoom", action="store_true", help="Apply subtle zoom")
-    parser.add_argument(
-        "--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING)"
-    )
-
+    parser = argparse.ArgumentParser(description="Render a video slideshow")
+    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--story-id", required=True)
+    parser.add_argument("--part-id", required=True)
+    parser.add_argument("--frames-dir", type=Path, required=True)
+    parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--audio-bitrate", default="192k")
+    parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
+
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
-    images = sorted(args.visuals_dir.glob(f"{args.story_id}_*.jpg"))
-    if not images:
-        logging.error("No images found for %s", args.story_id)
-        return 1
-
-    voice = args.voice_dir / f"{args.story_id}.mp3"
-    if not voice.exists():
-        logging.warning("Voiceover not found: %s", voice)
-        voice = None
-
-    music_candidates = sorted(args.music_dir.glob("*.mp3"))
-    music = music_candidates[0] if music_candidates else None
-    if music is None:
-        logging.warning("No background music found in %s", args.music_dir)
-
-    subtitle = args.subtitles_dir / f"{args.story_id}.srt"
-    if not subtitle.exists():
-        logging.warning("Subtitle file not found: %s", subtitle)
-        subtitle = None
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = args.output_dir / f"{args.story_id}_final.mp4"
-
-    cmd: list[str] = ["ffmpeg", "-y"]
-    for img in images:
-        cmd += ["-loop", "1", "-t", str(IMAGE_DURATION), "-i", str(img)]
-
-    audio_indices: list[int] = []
-    current_idx = len(images)
-    if voice:
-        cmd += ["-i", str(voice)]
-        audio_indices.append(current_idx)
-        current_idx += 1
-    if music:
-        cmd += ["-i", str(music)]
-        audio_indices.append(current_idx)
-        current_idx += 1
-    if not audio_indices:
-        # generate silent audio so ffmpeg succeeds
-        cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
-        audio_indices.append(current_idx)
-        current_idx += 1
-
-    video_filters, video_label = build_video_filters(
-        len(images), subtitle, args.dark_overlay, args.zoom
-    )
-    filter_parts = video_filters
-    audio_map: str
-    if len(audio_indices) > 1:
-        streams = "".join(f"[{i}:a]" for i in audio_indices)
-        filter_parts.append(
-            f"{streams}amix=inputs={len(audio_indices)}:duration=shortest[aout]"
+    try:
+        render(
+            args.job_id,
+            args.story_id,
+            args.part_id,
+            args.frames_dir,
+            fps=args.fps,
+            audio_bitrate=args.audio_bitrate,
         )
-        audio_map = "[aout]"
-    else:
-        audio_map = f"{audio_indices[0]}:a"
-
-    cmd += ["-filter_complex", "; ".join(filter_parts), "-map", video_label, "-map", audio_map]
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", str(output_file)]
-
-    return run_ffmpeg(cmd)
+    except Exception as exc:  # pragma: no cover - error path
+        log_error(
+            "error",
+            job_id=args.job_id,
+            error_class=exc.__class__.__name__,
+            error_message=str(exc),
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
