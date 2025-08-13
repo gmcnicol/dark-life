@@ -11,7 +11,10 @@ COPY apps/api /app/apps/api
 COPY shared /app/shared
 COPY video_renderer /app/video_renderer
 
-ENV WHISPER_MODEL=base \
+# Ensure project packages like "shared" are importable when running
+# the poller as a script.
+ENV PYTHONPATH=/app \
+    WHISPER_MODEL=base \
     OUTPUT_DIR=/output \
     TMPDIR=/tmp/render
 
