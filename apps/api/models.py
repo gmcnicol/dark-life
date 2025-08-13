@@ -165,6 +165,13 @@ class Job(SQLModel, table=True):
     )
 
 
+class JobUpdate(SQLModel):
+    """Payload for updating job status/result."""
+
+    status: str | None = None
+    result: dict | None = None
+
+
 class Upload(SQLModel, table=True):
     """Record of a story part uploaded to an external platform."""
 
@@ -193,6 +200,7 @@ __all__ = [
     "AssetRead",
     "AssetUpdate",
     "Job",
+    "JobUpdate",
     "Upload",
 ]
 

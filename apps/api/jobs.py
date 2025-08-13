@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from .db import get_session
-from .models import Job
+from .models import Job, JobUpdate
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -36,6 +36,24 @@ def get_job(job_id: int, session: Session = Depends(get_session)) -> Job:
     job = session.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.patch("/{job_id}", response_model=Job)
+def update_job(
+    job_id: int, update: JobUpdate, session: Session = Depends(get_session)
+) -> Job:
+    """Update a job's status or result."""
+    job = session.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if update.status is not None:
+        job.status = update.status
+    if update.result is not None:
+        job.result = update.result
+    session.add(job)
+    session.commit()
+    session.refresh(job)
     return job
 
 

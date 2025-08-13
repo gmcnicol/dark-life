@@ -1,62 +1,46 @@
 from pathlib import Path
 
-import sys
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
-
-from apps.api.models import Asset, Job, Story, StoryPart
 from shared.config import settings
 from services.renderer import poller
 
 
-def test_poller_processes_job(tmp_path, monkeypatch):
+def test_poller_processes_series(tmp_path, monkeypatch):
     video_dir = tmp_path / "videos"
     monkeypatch.setattr(settings, "VIDEO_OUTPUT_DIR", video_dir)
+    monkeypatch.setattr(settings, "API_BASE_URL", "http://api")
 
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
+    api_response = {
+        "story": {"id": 1, "title": "Test Story"},
+        "assets": [{"id": 1, "remote_url": "http://example.com/img.jpg"}],
+        "parts": [
+            {"job_id": 123, "index": 1, "body_md": "Hello world"},
+        ],
+    }
 
-    with Session(engine) as session:
-        story = Story(title="Test Story")
-        session.add(story)
-        session.commit()
-        session.refresh(story)
+    def fake_get(url, timeout):
+        class Resp:
+            def __init__(self, content: bytes = b"", data=None):
+                self.content = content
+                self._data = data
 
-        part = StoryPart(story_id=story.id, index=1, body_md="Hello world", est_seconds=5)
-        session.add(part)
+            def raise_for_status(self):
+                pass
 
-        asset = Asset(story_id=story.id, remote_url="http://example.com/img.jpg")
-        session.add(asset)
-        session.commit()
-        session.refresh(asset)
+            def json(self):  # type: ignore[override]
+                return self._data
 
-        job = Job(
-            story_id=story.id,
-            kind="render_part",
-            status="queued",
-            payload={
-                "story_id": story.id,
-                "part_index": 1,
-                "asset_ids": [asset.id],
-            },
-        )
-        session.add(job)
-        session.commit()
-        job_id = job.id
+        if url.endswith("/render/next-series"):
+            return Resp(data=api_response)
+        return Resp(content=b"img")
 
-    class DummyResponse:
-        content = b"img"
+    patch_calls = []
 
-        def raise_for_status(self):
-            pass
-
-    monkeypatch.setattr(poller.requests, "get", lambda url, timeout: DummyResponse())
+    def fake_patch(url, json, timeout):
+        patch_calls.append((url, json))
+        class Resp:
+            def raise_for_status(self):
+                pass
+        return Resp()
 
     def fake_slideshow(args):
         story_id = args[args.index("--story_id") + 1]
@@ -65,16 +49,15 @@ def test_poller_processes_job(tmp_path, monkeypatch):
         (output_dir / f"{story_id}_final.mp4").write_bytes(b"vid")
         return 0
 
+    monkeypatch.setattr(poller.requests, "get", fake_get)
+    monkeypatch.setattr(poller.requests, "patch", fake_patch)
     monkeypatch.setattr(poller.create_slideshow, "main", fake_slideshow)
     monkeypatch.setattr(poller.voiceover, "_synth_with_pyttsx3", lambda engine, text, dest: False)
     monkeypatch.setattr(poller.voiceover, "_placeholder_audio", lambda text, dest: dest.write_bytes(b"a"))
 
-    with Session(engine) as session:
-        processed = poller.process_once(session)
+    processed = poller.process_once()
 
     assert processed
     video_path = video_dir / "test-story_p01.mp4"
     assert video_path.exists()
-    with Session(engine) as session:
-        job = session.get(Job, job_id)
-        assert job.status == "success"
+    assert patch_calls and patch_calls[0][1]["status"] == "success"

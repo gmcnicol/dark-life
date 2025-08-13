@@ -22,7 +22,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "fastapi",
     "sqlmodel",
-    "psycopg2-binary",
+    "psycopg[binary]",
     "alembic",
     "faster-whisper",
     "google-api-python-client",
