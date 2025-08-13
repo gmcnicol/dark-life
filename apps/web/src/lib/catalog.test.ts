@@ -10,6 +10,6 @@ describe("fetchCatalog", () => {
   it("returns mocked images", async () => {
     const images = await fetchCatalog();
     expect(images).toHaveLength(2);
-    expect(images[0].url).toBeDefined();
+    expect(images[0]!.url).toBeDefined();
   });
 });

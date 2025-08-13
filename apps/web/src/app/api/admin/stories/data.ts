@@ -5,7 +5,7 @@ export interface StoryData {
   status: string;
 }
 
-let stories: StoryData[] = [
+const stories: StoryData[] = [
   { id: 1, title: "First story", body_md: "Hello", status: "pending" },
   {
     id: 2,

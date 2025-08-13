@@ -28,7 +28,7 @@ describe("splitSentences", () => {
     ];
     const parts = splitSentences(sentences, 2); // target 2 sec ~ 5 words
     expect(parts.length).toBe(3);
-    expect(parts[0].join(" ")).toContain("one");
-    expect(parts[2].join(" ")).toContain("seven");
+    expect(parts[0]!.join(" ")).toContain("one");
+    expect(parts[2]!.join(" ")).toContain("seven");
   });
 });
