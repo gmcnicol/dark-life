@@ -10,6 +10,14 @@ export const StorySchema = z.object({
 
 export type Story = z.infer<typeof StorySchema>;
 
+const StoryPartSchema = z.object({
+  index: z.number(),
+  body_md: z.string(),
+  est_seconds: z.number(),
+});
+
+export type StoryPart = z.infer<typeof StoryPartSchema>;
+
 export async function listStories(params: { status?: string } = {}): Promise<Story[]> {
   const searchParams = new URLSearchParams();
   if (params.status) {
@@ -36,4 +44,16 @@ export async function updateStoryStatus(
     body: JSON.stringify({ status, notes }),
   });
   return StorySchema.parse(data);
+}
+
+export async function splitStory(
+  id: number,
+  parts: string[],
+): Promise<StoryPart[]> {
+  const data = await apiFetch<unknown>(`/admin/stories/${id}/split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parts }),
+  });
+  return z.array(StoryPartSchema).parse(data);
 }
