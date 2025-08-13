@@ -15,13 +15,13 @@ Only built-in Python modules are used and ``ffmpeg`` is invoked through
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import shlex
 import subprocess
 from pathlib import Path
 
 from shared.config import settings
+from shared.logging import log_error, log_info
 
 IMAGE_DURATION = 5
 TRANSITION_DURATION = 1
@@ -79,14 +79,6 @@ def build_video_filters(
 
 def _settings_path(name: str, fallback: Path) -> Path:
     return Path(getattr(settings, name, fallback))
-
-
-def log_info(event: str, **fields: object) -> None:
-    logging.info(json.dumps({"service": "renderer", "event": event, **fields}))
-
-
-def log_error(event: str, **fields: object) -> None:
-    logging.error(json.dumps({"service": "renderer", "event": event, **fields}))
 
 
 def preflight(job_id: str, frames_dir: Path) -> tuple[list[Path], Path]:
@@ -184,19 +176,21 @@ def render(
     frames_dir: Path,
     fps: int = 30,
     audio_bitrate: str = "192k",
+    debug: bool = False,
 ) -> dict[str, object]:
     """Render the slideshow and return artifact metadata."""
 
     frames, track = preflight(job_id, frames_dir)
 
-    tmp_root = _settings_path("TMP_DIR", Path("/tmp/renderer"))
+    tmp_root = _settings_path("TMP_DIR", settings.TMP_DIR)
     out_dir = _settings_path("OUTPUT_DIR", settings.OUTPUT_DIR)
     job_tmp = tmp_root / job_id
     job_tmp.mkdir(parents=True, exist_ok=True)
     tmp_path = job_tmp / f"{story_id}_{part_id}.mp4"
 
     cmd = build_ffmpeg_cmd(frames_dir, track, tmp_path, fps=fps, audio_bitrate=audio_bitrate)
-    log_info("ffmpeg_cmd", job_id=job_id, argv=cmd)
+    if debug:
+        log_info("ffmpeg_cmd", job_id=job_id, argv=cmd)
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode != 0:
         snippet = proc.stderr.decode(errors="ignore")[-400:]
@@ -232,9 +226,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--audio-bitrate", default="192k")
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--json-logs", action="store_true")
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    level = getattr(logging, args.log_level.upper(), logging.INFO)
+    if args.debug:
+        level = logging.DEBUG
+    log_format = "%(message)s" if args.json_logs else None
+    logging.basicConfig(level=level, format=log_format)
 
     try:
         render(
@@ -244,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
             args.frames_dir,
             fps=args.fps,
             audio_bitrate=args.audio_bitrate,
+            debug=args.debug,
         )
     except Exception as exc:  # pragma: no cover - error path
         log_error(

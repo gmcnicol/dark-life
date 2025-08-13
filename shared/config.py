@@ -15,18 +15,29 @@ from pydantic_settings import BaseSettings
 load_dotenv()
 
 
+# Absolute path constants used across renderer components
+CONTENT_DIR = Path("/content")
+MUSIC_DIR = CONTENT_DIR / "audio" / "music"
+OUTPUT_DIR = Path("/output")
+TMP_DIR = Path("/tmp/renderer")
+
+
 class Settings(BaseSettings):
     """Application settings read from environment variables."""
 
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
-    CONTENT_DIR: Path = BASE_DIR / "content"
-    STORIES_DIR: Path = CONTENT_DIR / "stories"
-    AUDIO_DIR: Path = CONTENT_DIR / "audio"
-    VISUALS_DIR: Path = CONTENT_DIR / "visuals"
-    OUTPUT_DIR: Path = BASE_DIR / "output"
-    VIDEO_OUTPUT_DIR: Path = OUTPUT_DIR / "videos"
-    MANIFEST_DIR: Path = OUTPUT_DIR / "manifest"
-    RENDER_QUEUE_DIR: Path = BASE_DIR / "render_queue"
+    CONTENT_DIR: Path = Field(default=CONTENT_DIR)
+    MUSIC_DIR: Path = Field(default=MUSIC_DIR)
+    OUTPUT_DIR: Path = Field(default=OUTPUT_DIR)
+    TMP_DIR: Path = Field(default=TMP_DIR)
+    STORIES_DIR: Path = Field(default_factory=lambda: CONTENT_DIR / "stories")
+    AUDIO_DIR: Path = Field(default_factory=lambda: CONTENT_DIR / "audio")
+    VISUALS_DIR: Path = Field(default_factory=lambda: CONTENT_DIR / "visuals")
+    VIDEO_OUTPUT_DIR: Path = Field(default_factory=lambda: OUTPUT_DIR / "videos")
+    MANIFEST_DIR: Path = Field(default_factory=lambda: OUTPUT_DIR / "manifest")
+    RENDER_QUEUE_DIR: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent / "render_queue"
+    )
     YOUTUBE_CLIENT_SECRETS_FILE: Path | None = Field(
         default=None,
         description="Path to OAuth client secrets JSON for YouTube uploads",
@@ -88,4 +99,11 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-__all__ = ["Settings", "settings"]
+__all__ = [
+    "Settings",
+    "settings",
+    "CONTENT_DIR",
+    "MUSIC_DIR",
+    "OUTPUT_DIR",
+    "TMP_DIR",
+]
