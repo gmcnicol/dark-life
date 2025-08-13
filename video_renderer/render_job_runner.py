@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -175,7 +176,7 @@ async def _run_job(
 async def _poll_loop() -> None:
     """Continuously poll the API for queued jobs and dispatch them."""
 
-    headers = {"Authorization": f"Bearer {settings.ADMIN_API_TOKEN}"}
+    headers = {"Authorization": f"Bearer {settings.API_AUTH_TOKEN}"}
     sem = asyncio.Semaphore(settings.MAX_CONCURRENT)
     log_info(
         "start",
@@ -184,7 +185,7 @@ async def _poll_loop() -> None:
         lease_seconds=settings.LEASE_SECONDS,
         api_base=settings.API_BASE_URL,
         content_dir=str(settings.CONTENT_DIR),
-        music_dir=str(settings.CONTENT_DIR / "audio" / "music"),
+        music_dir=str(settings.MUSIC_DIR),
         output_dir=str(settings.OUTPUT_DIR),
     )
     async with httpx.AsyncClient(
@@ -237,8 +238,46 @@ async def _poll_loop() -> None:
 
 
 @app.command()
-def run() -> None:
+def run(
+    api_base_url: str = typer.Option(
+        settings.API_BASE_URL, "--api-base-url", help="API base URL"
+    ),
+    api_auth_token: str = typer.Option(
+        settings.API_AUTH_TOKEN, "--api-auth-token", help="API bearer token"
+    ),
+    poll_interval_ms: int = typer.Option(
+        settings.POLL_INTERVAL_MS, "--poll-interval-ms", help="Poll interval in ms"
+    ),
+    max_concurrent: int = typer.Option(
+        settings.MAX_CONCURRENT, "--max-concurrent", help="Max concurrent jobs"
+    ),
+    lease_seconds: int = typer.Option(
+        settings.LEASE_SECONDS, "--lease-seconds", help="Job lease in seconds"
+    ),
+    content_dir: Path = typer.Option(
+        settings.CONTENT_DIR, "--content-dir", help="Content directory"
+    ),
+    music_dir: Path = typer.Option(
+        settings.MUSIC_DIR, "--music-dir", help="Music directory"
+    ),
+    output_dir: Path = typer.Option(
+        settings.OUTPUT_DIR, "--output-dir", help="Output directory"
+    ),
+    tmp_dir: Path = typer.Option(
+        settings.TMP_DIR, "--tmp-dir", help="Temporary working directory"
+    ),
+) -> None:
     """Entry point for the CLI."""
+
+    settings.API_BASE_URL = api_base_url
+    settings.API_AUTH_TOKEN = api_auth_token
+    settings.POLL_INTERVAL_MS = poll_interval_ms
+    settings.MAX_CONCURRENT = max_concurrent
+    settings.LEASE_SECONDS = lease_seconds
+    settings.CONTENT_DIR = content_dir
+    settings.MUSIC_DIR = music_dir
+    settings.OUTPUT_DIR = output_dir
+    settings.TMP_DIR = tmp_dir
 
     asyncio.run(_poll_loop())
 

@@ -16,7 +16,7 @@ The web app now includes a `/board` Kanban view with drag-and-drop status update
    ```bash
    cp .env.sample .env
    ```
-   Fill any optional API keys and secrets. `ADMIN_API_TOKEN` defaults to `local-admin`.
+   Fill any optional API keys and secrets. `API_AUTH_TOKEN` defaults to `local-admin`.
 
 3. **Migrate & start**
    ```bash
@@ -51,7 +51,7 @@ docker compose -f infra/docker-compose.yml run --rm api sh -lc 'cd apps/api && a
 
 ### Admin endpoints
 
-Admin APIs require `Authorization: Bearer $ADMIN_API_TOKEN`.
+Admin APIs require `Authorization: Bearer $API_AUTH_TOKEN`.
 
 ## Reddit Ingestion
 
@@ -82,4 +82,14 @@ See [`.env.sample`](.env.sample) for the full list of configuration options.
 
 ## Renderer & Uploader
 
-The renderer polls the database for jobs and writes videos to `./output`. Schedule the uploader with cron or CI to publish rendered parts regularly.
+The renderer polls the database for jobs and writes videos to `./output`. Key environment defaults:
+
+- `POLL_INTERVAL_MS=5000`
+- `MAX_CONCURRENT=1`
+- `LEASE_SECONDS=120`
+- `CONTENT_DIR=/content`
+- `MUSIC_DIR=/content/audio/music`
+- `OUTPUT_DIR=/output`
+- `TMP_DIR=/tmp/renderer`
+
+Schedule the uploader with cron or CI to publish rendered parts regularly.

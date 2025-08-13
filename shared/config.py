@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 try:  # Optional dependency
@@ -9,17 +10,20 @@ try:  # Optional dependency
 except Exception:  # pragma: no cover - dotenv not installed
     def load_dotenv(*args, **kwargs):  # type: ignore
         return None
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 load_dotenv()
 
 
 # Absolute path constants used across renderer components
-CONTENT_DIR = Path("/content")
-MUSIC_DIR = CONTENT_DIR / "audio" / "music"
-OUTPUT_DIR = Path("/output")
-TMP_DIR = Path("/tmp/renderer")
+# Environment variables can override these defaults.
+CONTENT_DIR = Path(os.getenv("CONTENT_DIR", "/content"))
+MUSIC_DIR = Path(
+    os.getenv("MUSIC_DIR", str(Path(CONTENT_DIR) / "audio" / "music"))
+)
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/output"))
+TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/renderer"))
 
 
 class Settings(BaseSettings):
@@ -75,9 +79,10 @@ class Settings(BaseSettings):
         default="",
         description="Base URL for the Dark Life API (used by ingestors)",
     )
-    ADMIN_API_TOKEN: str = Field(
+    API_AUTH_TOKEN: str = Field(
         default="",
         description="Bearer token for privileged API access",
+        validation_alias=AliasChoices("API_AUTH_TOKEN", "ADMIN_API_TOKEN"),
     )
     POLL_INTERVAL_MS: int = Field(
         default=5000,
@@ -95,6 +100,18 @@ class Settings(BaseSettings):
         default=120,
         description="Lease duration when claiming render jobs",
     )
+
+    # Compatibility attribute; ``ADMIN_API_TOKEN`` is retained as a property
+    # so existing code referencing it continues to function. The backing
+    # environment variable may be either ``API_AUTH_TOKEN`` or
+    # ``ADMIN_API_TOKEN``.
+    @property
+    def ADMIN_API_TOKEN(self) -> str:  # pragma: no cover - simple alias
+        return self.API_AUTH_TOKEN
+
+    @ADMIN_API_TOKEN.setter
+    def ADMIN_API_TOKEN(self, value: str) -> None:  # pragma: no cover - alias
+        self.API_AUTH_TOKEN = value
 
 
 settings = Settings()
