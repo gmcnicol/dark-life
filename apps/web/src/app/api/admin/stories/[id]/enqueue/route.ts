@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addJobs } from "../../../jobs/data";
+import { adminApiFetch } from "../../../fetch";
 
 export async function POST(
-  _req: NextRequest,
-  { params }: { params: { id: string } },
+  req: NextRequest,
+  { params }: any, // eslint-disable-line @typescript-eslint/no-explicit-any
 ) {
-  const jobs = addJobs([
-    { story_id: Number(params.id), kind: "render", status: "queued" },
-  ]);
-  return NextResponse.json({ jobs });
+  const res = await adminApiFetch(`/admin/stories/${params.id}/enqueue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: await req.text(),
+  });
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
 }

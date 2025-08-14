@@ -23,5 +23,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps
       - run: pnpm --filter web e2e
       - run: pnpm --filter web build
+      - name: Check for leaked admin secrets
+        run: "! grep -R 'ADMIN_API_TOKEN\|ELEVENLABS_API_KEY\|API_AUTH_TOKEN' apps/web/.next"
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2

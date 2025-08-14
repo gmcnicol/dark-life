@@ -1,16 +1,17 @@
 import InboxList from "@/components/inbox-list";
 import { listStories } from "@/lib/stories";
 
-interface InboxPageProps {
-  searchParams: { status?: string };
-}
-
-export default async function InboxPage({ searchParams }: InboxPageProps) {
-  const stories = await listStories({ status: searchParams.status });
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
+  const params = await searchParams;
+  const stories = await listStories({ status: params.status });
   return (
     <div>
       <form>
-        <select name="status" defaultValue={searchParams.status ?? ""}>
+        <select name="status" defaultValue={params.status ?? ""}>
           <option value="">All</option>
           <option value="pending">Pending</option>
           <option value="approved">Approved</option>

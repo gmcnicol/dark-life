@@ -40,7 +40,10 @@ def _segment_text(text: str) -> list[SimpleNamespace]:
 def process_once() -> bool:
     """Fetch the next series to render from the API and process it."""
     base = settings.API_BASE_URL.rstrip("/")
-    resp = requests.get(f"{base}/render/next-series", timeout=30)
+    headers = {}
+    if settings.API_AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.API_AUTH_TOKEN}"
+    resp = requests.get(f"{base}/render/next-series", timeout=30, headers=headers)
     resp.raise_for_status()
     data = resp.json()
     story = data.get("story")
@@ -105,12 +108,14 @@ def process_once() -> bool:
                 f"{base}/jobs/{job_id}",
                 json={"status": "success", "result": {"video": final_path.name}},
                 timeout=30,
+                headers=headers,
             )
         except Exception as exc:  # pragma: no cover - error path
             requests.patch(
                 f"{base}/jobs/{job_id}",
                 json={"status": "failed", "result": {"error": str(exc)}} ,
                 timeout=30,
+                headers=headers,
             )
         print(json.dumps({"job_id": job_id, "part_index": part_index}))
         processed_any = True

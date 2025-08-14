@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listStories } from "./data";
+import { adminApiFetch } from "../fetch";
 
-export function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const status = searchParams.get("status");
-  let stories = listStories();
-  if (status) {
-    stories = stories.filter((s) => s.status === status);
-  }
-  return NextResponse.json(stories);
+export async function GET(req: NextRequest) {
+  const res = await adminApiFetch(`/admin/stories${req.nextUrl.search}`);
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
 }

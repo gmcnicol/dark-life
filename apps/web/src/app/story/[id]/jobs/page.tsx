@@ -1,5 +1,10 @@
 import JobTable from "@/components/JobTable";
 
-export default function StoryJobsPage({ params }: { params: { id: string } }) {
-  return <JobTable storyId={Number(params.id)} />;
+export default async function StoryJobsPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  return <JobTable storyId={Number(id)} />;
 }
