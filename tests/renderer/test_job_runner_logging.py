@@ -52,7 +52,7 @@ def test_poll_logs_queue_depth_and_paths(monkeypatch, caplog):
     monkeypatch.setattr(settings, "MUSIC_DIR", Path("/content/audio/music"))
     monkeypatch.setattr(settings, "OUTPUT_DIR", Path("/output"))
     monkeypatch.setattr(settings, "API_BASE_URL", "http://api")
-    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "t")
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "sekrittoken")
     monkeypatch.setattr(settings, "POLL_INTERVAL_MS", 10)
     monkeypatch.setattr(settings, "MAX_CLAIM", 1)
 

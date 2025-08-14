@@ -25,10 +25,11 @@ COPY video_renderer /app/video_renderer
 ENV PYTHONPATH=/app \
     WHISPER_MODEL=base \
     OUTPUT_DIR=/output \
-    TMPDIR=/tmp/render
+    TMPDIR=/tmp/render \
+    PYTHONUNBUFFERED=1
 
 VOLUME ["/output"]
 
-CMD ["python", "services/renderer/poller.py"]
+CMD ["python", "-u", "services/renderer/poller.py"]
 
 HEALTHCHECK CMD python -c "exit(0)"

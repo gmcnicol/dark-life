@@ -170,10 +170,11 @@ async def _run_job(
         else:
             lease_deadline = [time.time() + lease_sec]
 
+        # Heartbeat every 5-10 seconds to maintain lease and report progress
+        interval = max(lease_sec / 2, 5)
+        interval = min(interval, 10)
         hb_task = asyncio.create_task(
-            _heartbeat(
-                client, job_id, story_id, part_id, max(lease_sec / 2, 5), lease_deadline
-            )
+            _heartbeat(client, job_id, story_id, part_id, interval, lease_deadline)
         )
         job_deadline = time.time() + settings.JOB_TIMEOUT_SEC
         job_task = (
