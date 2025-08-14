@@ -1,24 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findStory, updateStory } from "../../data";
-
-const WORDS_PER_MINUTE = 160;
-const WORDS_PER_SECOND = WORDS_PER_MINUTE / 60;
+import { adminApiFetch } from "../../../fetch";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: any, // eslint-disable-line @typescript-eslint/no-explicit-any
 ) {
-  const story = findStory(Number(params.id));
-  if (!story) {
-    return new NextResponse("Not found", { status: 404 });
-  }
-  const body = await req.json();
-  const parts: string[] = Array.isArray(body.parts) ? body.parts : [];
-  const resp = parts.map((text, idx) => {
-    const words = text.trim().split(/\s+/).filter(Boolean).length;
-    const est_seconds = Math.round(words / WORDS_PER_SECOND);
-    return { index: idx + 1, body_md: text, est_seconds };
+  const res = await adminApiFetch(`/admin/stories/${params.id}/split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: await req.text(),
   });
-  updateStory(story.id, { status: "split" });
-  return NextResponse.json(resp);
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
 }

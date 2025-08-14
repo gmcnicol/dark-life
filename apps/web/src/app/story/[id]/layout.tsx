@@ -6,9 +6,10 @@ export default async function StoryLayout({
   params,
 }: {
   children: ReactNode;
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const story = await getStory(Number(params.id));
+  const { id } = await params;
+  const story = await getStory(Number(id));
   return (
     <div>
       <h1>{story.title}</h1>

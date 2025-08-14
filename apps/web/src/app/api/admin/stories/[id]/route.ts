@@ -1,22 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findStory, updateStory } from "../data";
+import { adminApiFetch } from "../../fetch";
 
-export function GET(
+export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: any, // eslint-disable-line @typescript-eslint/no-explicit-any
 ) {
-  const story = findStory(Number(params.id));
-  if (!story) {
+  const res = await adminApiFetch(`/admin/stories/${params.id}`);
+  if (res.status === 404) {
     return new NextResponse("Not found", { status: 404 });
   }
-  return NextResponse.json(story);
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
 }
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: any, // eslint-disable-line @typescript-eslint/no-explicit-any
 ) {
-  const body = await req.json();
-  const story = updateStory(Number(params.id), body);
-  return NextResponse.json(story);
+  const res = await adminApiFetch(`/admin/stories/${params.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: await req.text(),
+  });
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
 }

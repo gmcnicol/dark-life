@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listJobs } from "./data";
+import { adminApiFetch } from "../fetch";
 
-export function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const storyId = searchParams.get("story_id");
-  const jobs = listJobs(storyId ? Number(storyId) : undefined);
-  return NextResponse.json(jobs);
+export async function GET(req: NextRequest) {
+  const res = await adminApiFetch(`/admin/jobs${req.nextUrl.search}`);
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
 }
