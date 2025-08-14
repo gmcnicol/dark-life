@@ -25,6 +25,8 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `ELEVENLABS_MODEL_ID` – optional model identifier
 - `TTS_CACHE_DIR` – cache directory for generated audio
 - `TTS_RATE_LIMIT_RPS` – polite request rate limit
+- `TTS_SPEAKING_STYLE` – speaking style intensity (default `0`)
+- `TTS_SPEAKING_SPEED` – speaking speed multiplier (default `1.0`)
 
 ## Whisper ASR
 - `WHISPER_MODEL` – Whisper model size
@@ -39,4 +41,4 @@ This project uses the following environment variables. Copy `.env.example` to `.
 ## Secret Consumption
 - `API_AUTH_TOKEN` – attached to renderer API calls in [`services/renderer/poller.py`](../services/renderer/poller.py)
 - `ADMIN_API_TOKEN` – required by API admin endpoints such as [`apps/api/reddit_admin.py`](../apps/api/reddit_admin.py) and used by web route handlers via [`apps/web/src/app/api/admin/fetch.ts`](../apps/web/src/app/api/admin/fetch.ts)
-- `ELEVENLABS_API_KEY` – reserved for ElevenLabs TTS integration (not yet consumed)
+- `ELEVENLABS_API_KEY` – consumed by `services/renderer/tts.py`

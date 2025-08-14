@@ -105,6 +105,36 @@ class Settings(BaseSettings):
         description="Maximum seconds a render job may run before timing out",
     )
 
+    # ElevenLabs TTS configuration
+    ELEVENLABS_API_KEY: str = Field(
+        default="",
+        description="ElevenLabs authentication key",
+    )
+    ELEVENLABS_VOICE_ID: str = Field(
+        default="",
+        description="Voice identifier for synthesis",
+    )
+    ELEVENLABS_MODEL_ID: str = Field(
+        default="eleven_multilingual_v2",
+        description="Model identifier for synthesis",
+    )
+    TTS_CACHE_DIR: Path = Field(
+        default_factory=lambda: CONTENT_DIR / "tts_cache",
+        description="Directory for cached TTS audio",
+    )
+    TTS_RATE_LIMIT_RPS: int = Field(
+        default=3,
+        description="Polite request rate limit (requests per second)",
+    )
+    TTS_SPEAKING_STYLE: float = Field(
+        default=0.0,
+        description="Speaking style intensity (0-100)",
+    )
+    TTS_SPEAKING_SPEED: float = Field(
+        default=1.0,
+        description="Speaking speed multiplier",
+    )
+
     # Compatibility attribute; ``ADMIN_API_TOKEN`` is retained as a property
     # so existing code referencing it continues to function. The backing
     # environment variable may be either ``API_AUTH_TOKEN`` or
