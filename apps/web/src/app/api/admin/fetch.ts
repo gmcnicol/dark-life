@@ -1,3 +1,5 @@
+import "server-only";
+
 export async function adminApiFetch(path: string, init?: RequestInit) {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL;
   if (!base) {
