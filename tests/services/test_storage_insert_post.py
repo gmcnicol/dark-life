@@ -8,7 +8,7 @@ from shared.config import settings
 
 def test_insert_post_sends_payload(monkeypatch: pytest.MonkeyPatch):
     settings.API_BASE_URL = "http://api"
-    settings.ADMIN_API_TOKEN = "token"
+    settings.API_AUTH_TOKEN = "token"
 
     captured = {}
 
