@@ -1,5 +1,5 @@
 """Renderer service components."""
 
-from . import music, subtitles, tts
+from . import ffmpeg, music, subtitles, tts
 
-__all__ = ["tts", "subtitles", "music"]
+__all__ = ["tts", "subtitles", "music", "ffmpeg"]
