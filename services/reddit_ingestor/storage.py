@@ -11,6 +11,8 @@ expected to interact solely with the HTTP API.
 from datetime import datetime
 from typing import Any, Dict
 
+import random
+import time
 import requests
 
 from shared.config import settings
@@ -45,16 +47,27 @@ def insert_post(payload: Dict[str, Any]) -> bool:
     if settings.API_AUTH_TOKEN:
         headers["Authorization"] = f"Bearer {settings.API_AUTH_TOKEN}"
 
-    resp = requests.post(
-        f"{settings.API_BASE_URL.rstrip('/')}/admin/stories",
-        json=story,
-        headers=headers,
-        timeout=10,
-    )
-    if resp.status_code in (200, 201):
-        return True
-    if resp.status_code == 409:
-        return False
+    url = f"{settings.API_BASE_URL.rstrip('/')}/admin/stories"
+
+    for attempt in range(3):
+        resp = requests.post(url, json=story, headers=headers, timeout=10)
+        if resp.status_code in (200, 201):
+            return True
+        if resp.status_code == 409:
+            return False
+        if resp.status_code in (429,) or resp.status_code >= 500:
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after is not None:
+                try:
+                    delay = float(retry_after)
+                except ValueError:
+                    delay = 0
+            else:
+                delay = 2 ** attempt
+                delay += random.uniform(0, 1)
+            time.sleep(delay)
+            continue
+        resp.raise_for_status()
     resp.raise_for_status()
     return False
 

@@ -42,7 +42,7 @@ class Story(StoryBase, table=True):
     )
 
     __table_args__ = (
-        UniqueConstraint("source", "external_id", name="uq_story_source_external"),
+        Index("ix_story_source_external", "source", "external_id", unique=True),
     )
 
 

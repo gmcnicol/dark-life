@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import logging
 import time
 import os
+import random
 from typing import List, Optional, Tuple, Dict
 
 import requests
@@ -67,12 +68,24 @@ def _update_fetch_state(subreddit: str, fullname: str, created: datetime) -> Non
         "last_fullname": fullname,
         "last_created_utc": created.isoformat(),
     }
-    resp = requests.post(
-        f"{settings.API_BASE_URL.rstrip('/')}/admin/reddit/state",
-        json=payload,
-        headers=_auth_headers(),
-        timeout=10,
-    )
+    url = f"{settings.API_BASE_URL.rstrip('/')}/admin/reddit/state"
+    for attempt in range(3):
+        resp = requests.post(url, json=payload, headers=_auth_headers(), timeout=10)
+        if resp.status_code in (200, 201, 409):
+            return
+        if resp.status_code in (429,) or resp.status_code >= 500:
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after is not None:
+                try:
+                    delay = float(retry_after)
+                except ValueError:
+                    delay = 0
+            else:
+                delay = 2 ** attempt
+                delay += random.uniform(0, 1)
+            time.sleep(delay)
+            continue
+        resp.raise_for_status()
     resp.raise_for_status()
 
 
@@ -157,6 +170,7 @@ def fetch_incremental(
 ) -> int:
     """Fetch and store new posts for ``subreddit``."""
 
+    time.sleep(random.uniform(0, 1))
     client = client or RedditClient()
     last_fullname, last_created = _load_fetch_state(subreddit)
     after: Optional[str] = None

@@ -56,6 +56,25 @@ def test_upsert_story_logs_request(client: TestClient, caplog: pytest.LogCapture
         for r in caplog.records
     )
 
-    # upsert should return 200 on duplicate
+    # duplicate should return 409
+    res2 = client.post("/admin/stories", json=payload, headers=headers)
+    assert res2.status_code == 409
+
+
+def test_upsert_story_updates(client: TestClient):
+    payload = {
+        "external_id": "abc123",
+        "source": "reddit",
+        "title": "Test",
+        "author": "me",
+        "created_utc": 0,
+        "text": "hello",
+    }
+    headers = {"Authorization": "Bearer token"}
+    res = client.post("/admin/stories", json=payload, headers=headers)
+    assert res.status_code == 201
+
+    payload["title"] = "New Title"
     res2 = client.post("/admin/stories", json=payload, headers=headers)
     assert res2.status_code == 200
+    assert res2.json()["title"] == "New Title"

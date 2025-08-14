@@ -50,17 +50,25 @@ def upsert_story(
     )
     story = session.exec(stmt).first()
     if story:
-        story.title = payload.title
-        story.author = payload.author
-        story.body_md = payload.text
-        story.source_url = payload.url
-        story.nsfw = payload.nsfw
-        story.flair = payload.flair
-        story.tags = payload.tags
-        session.add(story)
-        session.commit()
-        session.refresh(story)
-        return story
+        changed = False
+        for attr, value in {
+            "title": payload.title,
+            "author": payload.author,
+            "body_md": payload.text,
+            "source_url": payload.url,
+            "nsfw": payload.nsfw,
+            "flair": payload.flair,
+            "tags": payload.tags,
+        }.items():
+            if getattr(story, attr) != value:
+                setattr(story, attr, value)
+                changed = True
+        if changed:
+            session.add(story)
+            session.commit()
+            session.refresh(story)
+            return story
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": "duplicate"})
     story = Story(
         external_id=payload.external_id,
         source=payload.source,
