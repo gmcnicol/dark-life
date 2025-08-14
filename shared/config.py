@@ -135,6 +135,20 @@ class Settings(BaseSettings):
         description="Speaking speed multiplier",
     )
 
+    # Whisper ASR and subtitle configuration
+    WHISPER_MODEL: str = Field(
+        default="base", description="Whisper model size"
+    )
+    WHISPER_DEVICE: str = Field(
+        default="cpu", description="Device for Whisper inference"
+    )
+    SUBTITLES_FORMAT: str = Field(
+        default="srt", description="Subtitle output format (srt or vtt)"
+    )
+    SUBTITLES_BURN_IN: bool = Field(
+        default=False, description="Burn subtitles into video when true"
+    )
+
     # Compatibility attribute; ``ADMIN_API_TOKEN`` is retained as a property
     # so existing code referencing it continues to function. The backing
     # environment variable may be either ``API_AUTH_TOKEN`` or
