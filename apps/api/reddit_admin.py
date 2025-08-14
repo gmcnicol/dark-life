@@ -5,10 +5,11 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlmodel import Session, select
 from sqlalchemy import Table, Column, DateTime, Text, MetaData, func
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, insert as pg_insert
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from .db import get_session
 from .models import Job
@@ -130,25 +131,45 @@ def upsert_state(
     session: Session = Depends(get_session),
     _: None = Depends(require_token),
 ) -> dict:
-    stmt = pg_insert(reddit_fetch_state).values(
+    row = session.exec(
+        select(reddit_fetch_state).where(
+            reddit_fetch_state.c.subreddit == payload.subreddit
+        )
+    ).first()
+    existing = row._mapping if row else None
+    if existing:
+        if (
+            existing["last_fullname"] == payload.last_fullname
+            and existing["last_created_utc"] == payload.last_created_utc
+        ):
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={"detail": "duplicate"},
+            )
+        stmt = (
+            reddit_fetch_state.update()
+            .where(reddit_fetch_state.c.subreddit == payload.subreddit)
+            .values(
+                last_fullname=payload.last_fullname,
+                last_created_utc=payload.last_created_utc,
+                mode="incremental",
+                updated_at=func.now(),
+            )
+        )
+        session.exec(stmt)
+        session.commit()
+        return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "updated"})
+    stmt = reddit_fetch_state.insert().values(
         id=uuid.uuid4(),
         subreddit=payload.subreddit,
         last_fullname=payload.last_fullname,
         last_created_utc=payload.last_created_utc,
         mode="incremental",
         updated_at=func.now(),
-    ).on_conflict_do_update(
-        index_elements=[reddit_fetch_state.c.subreddit],
-        set_={
-            "last_fullname": payload.last_fullname,
-            "last_created_utc": payload.last_created_utc,
-            "mode": "incremental",
-            "updated_at": func.now(),
-        },
     )
     session.exec(stmt)
     session.commit()
-    return {"status": "ok"}
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content={"status": "created"})
 
 
 @router.get("/jobs", response_model=list[Job])
