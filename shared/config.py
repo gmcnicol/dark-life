@@ -100,6 +100,10 @@ class Settings(BaseSettings):
         default=120,
         description="Lease duration when claiming render jobs",
     )
+    JOB_TIMEOUT_SEC: int = Field(
+        default=600,
+        description="Maximum seconds a render job may run before timing out",
+    )
 
     # Compatibility attribute; ``ADMIN_API_TOKEN`` is retained as a property
     # so existing code referencing it continues to function. The backing

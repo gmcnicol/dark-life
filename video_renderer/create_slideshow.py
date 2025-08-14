@@ -20,11 +20,41 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import httpx
+
 from shared.config import settings
 from shared.logging import log_debug, log_error, log_info
 
 IMAGE_DURATION = 5
 TRANSITION_DURATION = 1
+
+
+class RenderError(RuntimeError):
+    """Rendering failed after posting status to the API."""
+
+
+def _post_status(job_id: str, payload: dict[str, object]) -> None:
+    """Best-effort POST of status updates to the API."""
+
+    if not settings.API_BASE_URL:
+        return
+    headers = {}
+    if settings.API_AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.API_AUTH_TOKEN}"
+    try:
+        httpx.post(
+            f"{settings.API_BASE_URL}/api/render-jobs/{job_id}/status",
+            json=payload,
+            headers=headers,
+            timeout=10.0,
+        )
+    except Exception as exc:  # pragma: no cover - best effort
+        log_error(
+            "error",
+            job_id=job_id,
+            error_class=exc.__class__.__name__,
+            error_message=str(exc),
+        )
 
 
 def build_video_filters(
@@ -186,8 +216,26 @@ def render(
     debug: bool = False,
 ) -> dict[str, object]:
     """Render the slideshow and return artifact metadata."""
-
-    frames, track = preflight(job_id, frames_dir, story_id, part_id)
+    try:
+        frames, track = preflight(job_id, frames_dir, story_id, part_id)
+    except FileNotFoundError as exc:
+        _post_status(
+            job_id,
+            {
+                "status": "errored",
+                "error_class": "PreflightError",
+                "error_message": str(exc),
+            },
+        )
+        log_error(
+            "error",
+            job_id=job_id,
+            story_id=story_id,
+            part_id=part_id,
+            error_class="PreflightError",
+            error_message=str(exc),
+        )
+        raise RenderError(str(exc)) from exc
 
     tmp_root = _settings_path("TMP_DIR", settings.TMP_DIR)
     out_dir = _settings_path("OUTPUT_DIR", settings.OUTPUT_DIR)
@@ -200,6 +248,15 @@ def render(
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode != 0:
         snippet = proc.stderr.decode(errors="ignore")[-400:]
+        _post_status(
+            job_id,
+            {
+                "status": "errored",
+                "error_class": "FFmpegError",
+                "exit_code": proc.returncode,
+                "stderr_snippet": snippet,
+            },
+        )
         log_error(
             "error",
             job_id=job_id,
@@ -209,7 +266,7 @@ def render(
             error_class="FFmpegError",
             stderr_snippet=snippet,
         )
-        raise RuntimeError("ffmpeg failed")
+        raise RenderError("ffmpeg failed")
 
     final_path = out_dir / f"{story_id}_{part_id}.mp4"
     tmp_path.replace(final_path)
@@ -255,7 +312,17 @@ def main(argv: list[str] | None = None) -> int:
             audio_bitrate=args.audio_bitrate,
             debug=args.debug,
         )
+    except RenderError:
+        return 1
     except Exception as exc:  # pragma: no cover - error path
+        _post_status(
+            args.job_id,
+            {
+                "status": "errored",
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
+        )
         log_error(
             "error",
             job_id=args.job_id,

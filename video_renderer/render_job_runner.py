@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,20 +21,38 @@ from . import create_slideshow, voiceover, whisper_subs
 app = typer.Typer(add_completion=False)
 
 
+class LeaseExpired(RuntimeError):
+    """Raised when a job lease expires before completion."""
+
+
 async def _heartbeat(
     client: httpx.AsyncClient,
     job_id: str,
     story_id: str | None,
     part_id: str | None,
     interval: float,
+    lease_deadline: list[float],
 ) -> None:
-    """Send periodic heartbeats for ``job_id`` until cancelled."""
+    """Send periodic heartbeats for ``job_id`` until cancelled.
+
+    ``lease_deadline`` is a single-item list containing the epoch time when the
+    lease currently expires. Each successful heartbeat updates this value.
+    """
 
     start = time.monotonic()
     try:
         while True:
             await asyncio.sleep(interval)
-            await client.post(f"/api/render-jobs/{job_id}/heartbeat")
+            resp = await client.post(f"/api/render-jobs/{job_id}/heartbeat")
+            try:
+                data = resp.json()
+                expires = data.get("lease_expires_at")
+                if expires:
+                    lease_deadline[0] = datetime.fromisoformat(
+                        expires.replace("Z", "+00:00")
+                    ).timestamp()
+            except Exception:
+                pass
             elapsed = int(time.monotonic() - start)
             log_info(
                 "rendering",
@@ -123,7 +142,10 @@ def _process_job(job: RenderJob) -> bool:
 
 
 async def _run_job(
-    client: httpx.AsyncClient, job: dict[str, Any], sem: asyncio.Semaphore
+    client: httpx.AsyncClient,
+    job: dict[str, Any],
+    sem: asyncio.Semaphore,
+    lease_expires_at: str | None = None,
 ) -> None:
     """Run a single claimed job under ``sem`` concurrency control."""
 
@@ -137,29 +159,102 @@ async def _run_job(
             story_id = job.get("story_id")
             part_id = job.get("part_id")
             lease_sec = int(job.get("lease_seconds", settings.LEASE_SECONDS))
+
+        if lease_expires_at:
+            try:
+                lease_deadline = [
+                    datetime.fromisoformat(lease_expires_at.replace("Z", "+00:00")).timestamp()
+                ]
+            except Exception:
+                lease_deadline = [time.time() + lease_sec]
+        else:
+            lease_deadline = [time.time() + lease_sec]
+
         hb_task = asyncio.create_task(
-            _heartbeat(client, job_id, story_id, part_id, max(lease_sec / 2, 5))
+            _heartbeat(
+                client, job_id, story_id, part_id, max(lease_sec / 2, 5), lease_deadline
+            )
         )
+        job_deadline = time.time() + settings.JOB_TIMEOUT_SEC
+        job_task = (
+            asyncio.to_thread(_process_job, job)
+            if isinstance(job, RenderJob)
+            else _process_api_job(job)
+        )
+        job_task = asyncio.create_task(job_task)
         try:
             await client.post(
                 f"/api/render-jobs/{job_id}/status", json={"status": "rendering"}
             )
+            while True:
+                now = time.time()
+                remaining = min(lease_deadline[0], job_deadline) - now
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                try:
+                    await asyncio.wait_for(job_task, timeout=remaining)
+                    break
+                except asyncio.TimeoutError:
+                    now = time.time()
+                    if now >= job_deadline:
+                        raise asyncio.TimeoutError
+                    if now >= lease_deadline[0]:
+                        raise LeaseExpired()
+                    continue
+
             if isinstance(job, RenderJob):
-                success = await asyncio.to_thread(_process_job, job)
-            else:
-                await _process_api_job(job)
-                success = True
-            if success:
-                await client.post(
-                    f"/api/render-jobs/{job_id}/status",
-                    json={"status": "rendered", "metadata": {}},
-                )
-            else:
-                raise RuntimeError("processing failed")
+                success = job_task.result()
+                if not success:
+                    raise RuntimeError("processing failed")
+            await client.post(
+                f"/api/render-jobs/{job_id}/status",
+                json={"status": "rendered", "metadata": {}},
+            )
+        except asyncio.TimeoutError:
+            await client.post(
+                f"/api/render-jobs/{job_id}/status",
+                json={
+                    "status": "errored",
+                    "error_class": "TimeoutError",
+                    "error_message": "job timed out",
+                    "timeout": True,
+                },
+            )
+            log_error(
+                "error",
+                job_id=job_id,
+                story_id=story_id,
+                part_id=part_id,
+                error_class="TimeoutError",
+                error_message="job timed out",
+            )
+        except LeaseExpired:
+            await client.post(
+                f"/api/render-jobs/{job_id}/status",
+                json={
+                    "status": "errored",
+                    "error_class": "LeaseExpired",
+                    "error_message": "lease expired",
+                },
+            )
+            log_error(
+                "error",
+                job_id=job_id,
+                story_id=story_id,
+                part_id=part_id,
+                error_class="LeaseExpired",
+                error_message="lease expired",
+            )
+        except create_slideshow.RenderError:
+            pass
         except Exception as exc:  # pragma: no cover - error path
             await client.post(
                 f"/api/render-jobs/{job_id}/status",
-                json={"status": "errored", "error_message": str(exc)},
+                json={
+                    "status": "errored",
+                    "error_class": exc.__class__.__name__,
+                    "error_message": str(exc),
+                },
             )
             log_error(
                 "error",
@@ -209,6 +304,7 @@ async def _poll_loop() -> None:
                             json={"lease_seconds": settings.LEASE_SECONDS},
                         )
                         claim_resp.raise_for_status()
+                        claim_data = claim_resp.json()
                         log_info(
                             "claim",
                             job_id=job_id,
@@ -217,7 +313,9 @@ async def _poll_loop() -> None:
                             lease_sec=job.get("lease_seconds", settings.LEASE_SECONDS),
                             queue_depth=queue_depth,
                         )
-                        asyncio.create_task(_run_job(client, job, sem))
+                        asyncio.create_task(
+                            _run_job(client, job, sem, claim_data.get("lease_expires_at"))
+                        )
                     except Exception as exc:  # pragma: no cover - claim failure
                         log_error(
                             "error",
@@ -254,6 +352,9 @@ def run(
     lease_seconds: int = typer.Option(
         settings.LEASE_SECONDS, "--lease-seconds", help="Job lease in seconds"
     ),
+    job_timeout_sec: int = typer.Option(
+        settings.JOB_TIMEOUT_SEC, "--job-timeout-sec", help="Max seconds per job"
+    ),
     content_dir: Path = typer.Option(
         settings.CONTENT_DIR, "--content-dir", help="Content directory"
     ),
@@ -274,6 +375,7 @@ def run(
     settings.POLL_INTERVAL_MS = poll_interval_ms
     settings.MAX_CONCURRENT = max_concurrent
     settings.LEASE_SECONDS = lease_seconds
+    settings.JOB_TIMEOUT_SEC = job_timeout_sec
     settings.CONTENT_DIR = content_dir
     settings.MUSIC_DIR = music_dir
     settings.OUTPUT_DIR = output_dir
