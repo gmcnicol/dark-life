@@ -148,6 +148,13 @@ class Job(SQLModel, table=True):
     story_id: int | None = Field(default=None, foreign_key="story.id")
     kind: str
     status: str
+    lease_expires_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True))
+    )
+    retries: int = 0
+    error_class: str | None = None
+    error_message: str | None = None
+    stderr_snippet: str | None = None
     payload: dict | None = Field(default=None, sa_column=Column(JSON))
     result: dict | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime | None = Field(
