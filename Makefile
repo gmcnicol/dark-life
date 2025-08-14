@@ -1,5 +1,5 @@
 .RECIPEPREFIX := >
-.PHONY: init sync test up down logs api web renderer uploader ingest rebuild migrate smoke
+.PHONY: init sync test up down logs api web renderer renderer-logs renderer-run renderer-ffreport renderer-clean uploader ingest rebuild migrate smoke
 
 VENV_DIR := .venv
 COMPOSE := docker compose -f infra/docker-compose.yml
@@ -33,6 +33,20 @@ web:
 
 renderer:
 >$(COMPOSE) up -d renderer
+
+renderer-logs:
+>$(COMPOSE) logs -f --tail=0 renderer
+
+renderer-run:
+>$(COMPOSE) run --rm --no-deps renderer \
+    python -u video_renderer/create_slideshow.py \
+    --job-id $$JOB --story-id $$STORY --part-id $$PART --frames-dir $$FRAMES --debug
+
+renderer-ffreport:
+>$(COMPOSE) run --rm --no-deps renderer sh -lc 'tail -F /tmp/ffreport-$$JOB.log'
+
+renderer-clean:
+>$(COMPOSE) run --rm --no-deps renderer rm -rf /tmp/renderer/* /tmp/ffreport-*.log
 
 uploader:
 >$(COMPOSE) run --rm uploader
