@@ -2,7 +2,7 @@ const rule = {
   meta: {
     type: "problem",
     docs: {
-      description: "disallow direct client fetches to NEXT_PUBLIC_API_BASE_URL/admin",
+      description: "disallow direct client fetches to admin endpoints",
     },
     messages: {
       forbidden: "Use /api/admin route handlers instead of fetching NEXT_PUBLIC_API_BASE_URL/admin",
@@ -21,13 +21,20 @@ const rule = {
         node.property.name === "NEXT_PUBLIC_API_BASE_URL"
       );
     }
-    function hasAdminLiteral(node) {
+
+    function literalHasAdmin(node) {
       return (
         node.type === "Literal" &&
         typeof node.value === "string" &&
-        node.value.startsWith("/admin")
+        node.value.includes("/admin") &&
+        !node.value.startsWith("/api/admin")
       );
     }
+
+    function templateValue(node) {
+      return node.quasis.map((q) => q.value.raw).join("");
+    }
+
     return {
       CallExpression(node) {
         if (
@@ -36,17 +43,27 @@ const rule = {
           node.arguments.length > 0
         ) {
           const arg = node.arguments[0];
+
+          if (literalHasAdmin(arg)) {
+            context.report({ node, messageId: "forbidden" });
+            return;
+          }
+
           if (
             arg.type === "BinaryExpression" &&
             isEnvBase(arg.left) &&
-            hasAdminLiteral(arg.right)
+            literalHasAdmin(arg.right)
           ) {
             context.report({ node, messageId: "forbidden" });
+            return;
           }
+
           if (arg.type === "TemplateLiteral") {
+            const value = templateValue(arg);
             const hasEnv = arg.expressions.some(isEnvBase);
-            const hasAdmin = arg.quasis.some((q) => q.value.raw.startsWith("/admin"));
-            if (hasEnv && hasAdmin) {
+            const hasAdmin = value.includes("/admin");
+            const allowed = value.startsWith("/api/admin");
+            if ((hasEnv && hasAdmin) || (!hasEnv && hasAdmin && !allowed)) {
               context.report({ node, messageId: "forbidden" });
             }
           }

@@ -1,4 +1,7 @@
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!path.startsWith("/")) {
+    throw new Error("apiFetch path must start with '/'");
+  }
   const url =
     typeof window === "undefined"
       ? `http://localhost:3000/api${path}`
