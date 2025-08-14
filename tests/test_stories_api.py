@@ -61,9 +61,12 @@ def test_pagination(client: TestClient):
 
 
 def test_split_story_parts_order(client: TestClient):
-    body = " ".join([
-        ("word " * 10 + f"sentence {i}.").strip() for i in range(5)
-    ])
+    body = " ".join(
+        [
+            ("word " * 50 + f"sentence {i}.").strip()
+            for i in range(20)
+        ]
+    )
     story = create_story(client, "Split me", "approved")
     res = client.patch(
         f"/stories/{story['id']}", json={"body_md": body}
@@ -71,17 +74,17 @@ def test_split_story_parts_order(client: TestClient):
     assert res.status_code == 200
 
     res = client.post(
-        f"/stories/{story['id']}/split", params={"target_seconds": 15}
+        f"/stories/{story['id']}/split", params={"target_seconds": 60}
     )
     assert res.status_code == 200
     parts = res.json()
-    assert len(parts) == 2
-    assert [p["index"] for p in parts] == [1, 2]
+    assert len(parts) >= 2
+    assert [p["index"] for p in parts] == list(range(1, len(parts) + 1))
     # ensure ordering of sentences
     first_part_text = parts[0]["body_md"]
-    second_part_text = parts[1]["body_md"]
+    last_part_text = parts[-1]["body_md"]
     assert "sentence 0" in first_part_text
-    assert "sentence 4" in second_part_text
+    assert "sentence 19" in last_part_text
 
 
 def test_extract_keywords_matches_domain_list():

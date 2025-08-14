@@ -99,12 +99,12 @@ def test_get_images_unranked_last(client: TestClient, monkeypatch: pytest.Monkey
 
 
 def test_split_endpoint_creates_parts(client: TestClient):
-    body = " ".join([f"Sentence {i}." for i in range(20)])
+    body = " ".join([f"Sentence {i}." for i in range(120)])
     story = client.post(
         "/stories", json={"title": "Split", "body_md": body}
     ).json()
 
-    res = client.post(f"/stories/{story['id']}/split", params={"target_seconds": 5})
+    res = client.post(f"/stories/{story['id']}/split", params={"target_seconds": 60})
     assert res.status_code == 200
     parts = res.json()
     assert len(parts) >= 2
@@ -112,7 +112,7 @@ def test_split_endpoint_creates_parts(client: TestClient):
 
 
 def test_enqueue_series_creates_jobs(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    body = "Sentence one. Sentence two. Sentence three."
+    body = " ".join([f"Sentence {i}." for i in range(120)])
     story = client.post(
         "/stories", json={"title": "Full", "body_md": body}
     ).json()
@@ -136,7 +136,7 @@ def test_enqueue_series_creates_jobs(client: TestClient, monkeypatch: pytest.Mon
     assert res.status_code == 200
 
     parts = client.post(
-        f"/stories/{story['id']}/split", params={"target_seconds": 10}
+        f"/stories/{story['id']}/split", params={"target_seconds": 60}
     ).json()
 
     res = client.post(f"/stories/{story['id']}/enqueue-series")

@@ -83,6 +83,8 @@ class StoryPart(SQLModel, table=True):
     index: int
     body_md: str
     est_seconds: int
+    start_char: int = 0
+    end_char: int = 0
     created_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), server_default=func.now())
     )
@@ -100,6 +102,8 @@ class StoryPartRead(SQLModel):
     index: int
     body_md: str
     est_seconds: int
+    start_char: int
+    end_char: int
 
 
 class Asset(SQLModel, table=True):
