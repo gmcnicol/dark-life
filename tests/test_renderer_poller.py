@@ -17,7 +17,7 @@ def test_poller_processes_series(tmp_path, monkeypatch):
         ],
     }
 
-    def fake_get(url, timeout):
+    def fake_get(url, timeout, headers=None):
         class Resp:
             def __init__(self, content: bytes = b"", data=None):
                 self.content = content
@@ -35,7 +35,7 @@ def test_poller_processes_series(tmp_path, monkeypatch):
 
     patch_calls = []
 
-    def fake_patch(url, json, timeout):
+    def fake_patch(url, json, timeout, headers=None):
         patch_calls.append((url, json))
         class Resp:
             def raise_for_status(self):

@@ -14,6 +14,7 @@ from .jobs import router as jobs_router
 from .reddit_admin import router as reddit_admin_router
 from .admin_stories import router as admin_stories_router
 from .render import router as render_router
+from .render_jobs import router as render_jobs_router
 
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,7 @@ app.include_router(jobs_router)
 app.include_router(reddit_admin_router)
 app.include_router(admin_stories_router)
 app.include_router(render_router)
+app.include_router(render_jobs_router)
 
 
 @app.on_event("startup")
