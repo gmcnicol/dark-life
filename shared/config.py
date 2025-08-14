@@ -105,6 +105,16 @@ class Settings(BaseSettings):
         description="Maximum seconds a render job may run before timing out",
     )
 
+    # Background music mix configuration
+    MUSIC_GAIN_DB: float = Field(
+        default=-3.0,
+        description="Baseline gain applied to music tracks in dB",
+    )
+    DUCKING_DB: float = Field(
+        default=-12.0,
+        description="Additional attenuation applied to music when voice is present",
+    )
+
     # ElevenLabs TTS configuration
     ELEVENLABS_API_KEY: str = Field(
         default="",
