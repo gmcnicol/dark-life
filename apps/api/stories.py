@@ -9,7 +9,7 @@ from typing import Iterable, Any
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, status, Response
-from sqlmodel import Session, select
+from sqlmodel import Session, select, SQLModel
 
 from .db import get_session
 from .models import (
@@ -47,6 +47,97 @@ KEYWORD_RE = re.compile(
 
 WORDS_PER_MINUTE = 160
 WORDS_PER_SECOND = WORDS_PER_MINUTE / 60
+CHARS_PER_WORD = 5
+CHARS_PER_SECOND = WORDS_PER_SECOND * CHARS_PER_WORD
+
+MIN_PART_SECONDS = 30
+MAX_PART_SECONDS = 75
+
+
+def _estimate_seconds(text: str) -> int:
+    """Estimate duration in seconds from character length."""
+    return max(1, int(round(len(text) / CHARS_PER_SECOND)))
+
+
+SENTENCE_RE = re.compile(r"[^.!?]+[.!?](?:\s+|$)")
+
+
+def _sentence_spans(text: str) -> list[tuple[str, int, int]]:
+    """Return list of (sentence, start, end) for the given text."""
+    spans: list[tuple[str, int, int]] = []
+    for match in SENTENCE_RE.finditer(text):
+        spans.append((match.group().strip(), match.start(), match.end()))
+    if spans and spans[-1][2] < len(text):
+        # trailing text without terminal punctuation
+        spans.append((text[spans[-1][2]:].strip(), spans[-1][2], len(text)))
+    elif not spans:
+        spans.append((text.strip(), 0, len(text)))
+    return spans
+
+
+def _snap_boundaries(text: str, start: int, end: int) -> tuple[int, int]:
+    """Snap start/end to nearest sentence boundaries."""
+    sentences = _sentence_spans(text)
+    for _, s, e in sentences:
+        if s <= start < e:
+            start = s
+        if s < end <= e:
+            end = e
+    if start >= end:
+        raise ValueError("Invalid boundaries")
+    end = min(end, len(text))
+    # trim trailing whitespace from end boundary
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
+def _build_parts(body: str, target_seconds: int) -> list[tuple[int, int]]:
+    """Split body into (start, end) parts honoring duration bounds."""
+    spans = _sentence_spans(body)
+    target_chars = target_seconds * CHARS_PER_SECOND
+    max_chars = MAX_PART_SECONDS * CHARS_PER_SECOND
+    parts: list[tuple[int, int]] = []
+    current_start = spans[0][1]
+    current_end = spans[0][2]
+    current_chars = current_end - current_start
+    for sent, s, e in spans[1:]:
+        sent_chars = e - s
+        projected = current_chars + sent_chars
+        if current_chars and (projected > target_chars or projected > max_chars):
+            parts.append((current_start, current_end))
+            current_start = s
+            current_chars = sent_chars
+        else:
+            current_chars = projected
+        current_end = e
+    parts.append((current_start, current_end))
+    # merge last part if too short
+    if len(parts) > 1:
+        start, end = parts[-1]
+        if _estimate_seconds(body[start:end]) < MIN_PART_SECONDS:
+            prev_start, _ = parts[-2]
+            parts[-2] = (prev_start, end)
+            parts.pop()
+    # validate bounds
+    for start, end in parts:
+        secs = _estimate_seconds(body[start:end])
+        if secs < MIN_PART_SECONDS or secs > MAX_PART_SECONDS:
+            raise HTTPException(status_code=400, detail="Part duration out of bounds")
+    return parts
+
+
+class PartBounds(SQLModel):
+    start_char: int
+    end_char: int
+
+
+class PartPreview(SQLModel):
+    index: int
+    body_md: str
+    est_seconds: int
+    start_char: int
+    end_char: int
 
 
 def _extract_keywords(story: Story) -> str:
@@ -263,22 +354,7 @@ def split_story(
     if not story.body_md:
         raise HTTPException(status_code=400, detail="Story body is empty")
 
-    words_per_part = int(target_seconds * WORDS_PER_SECOND)
-    sentences = re.split(r"(?<=[.!?])\s+", story.body_md.strip())
-
-    parts_text: list[str] = []
-    current: list[str] = []
-    word_count = 0
-    for sentence in sentences:
-        sent_words = len(sentence.split())
-        if current and word_count + sent_words > words_per_part:
-            parts_text.append(" ".join(current).strip())
-            current = []
-            word_count = 0
-        current.append(sentence)
-        word_count += sent_words
-    if current:
-        parts_text.append(" ".join(current).strip())
+    parts_bounds = _build_parts(story.body_md, target_seconds)
 
     existing_parts = session.exec(
         select(StoryPart).where(StoryPart.story_id == story_id)
@@ -287,14 +363,16 @@ def split_story(
         session.delete(part)
 
     parts: list[StoryPart] = []
-    for idx, text in enumerate(parts_text, 1):
-        words = len(text.split())
-        est_seconds = int(round(words / WORDS_PER_SECOND))
+    for idx, (start, end) in enumerate(parts_bounds, 1):
+        text = story.body_md[start:end].strip()
+        est_seconds = _estimate_seconds(text)
         part = StoryPart(
             story_id=story_id,
             index=idx,
             body_md=text,
             est_seconds=est_seconds,
+            start_char=start,
+            end_char=end,
         )
         session.add(part)
         parts.append(part)
@@ -302,6 +380,81 @@ def split_story(
     for part in parts:
         session.refresh(part)
     return parts
+
+
+@router.post("/{story_id}/preview", response_model=list[PartPreview])
+def preview_parts(
+    story_id: int, parts: list[PartBounds], session: Session = Depends(get_session)
+) -> list[PartPreview]:
+    """Preview parts by returning snapped boundaries and estimated durations."""
+    story = session.get(Story, story_id)
+    if not story or not story.body_md:
+        raise HTTPException(status_code=404, detail="Story not found")
+    previews: list[PartPreview] = []
+    body = story.body_md
+    for idx, pb in enumerate(sorted(parts, key=lambda p: p.start_char), 1):
+        start, end = _snap_boundaries(body, pb.start_char, pb.end_char)
+        text = body[start:end].strip()
+        secs = _estimate_seconds(text)
+        previews.append(
+            PartPreview(
+                index=idx,
+                body_md=text,
+                est_seconds=secs,
+                start_char=start,
+                end_char=end,
+            )
+        )
+    return previews
+
+
+@router.put("/{story_id}/parts", response_model=list[StoryPartRead])
+def replace_parts(
+    story_id: int, parts: list[PartBounds], session: Session = Depends(get_session)
+) -> list[StoryPartRead]:
+    """Replace all parts for a story with provided boundaries."""
+    story = session.get(Story, story_id)
+    if not story or not story.body_md:
+        raise HTTPException(status_code=404, detail="Story not found")
+    if not parts:
+        raise HTTPException(status_code=400, detail="No parts provided")
+    body = story.body_md
+    bounds: list[tuple[int, int]] = []
+    prev_end = 0
+    for pb in sorted(parts, key=lambda p: p.start_char):
+        start, end = _snap_boundaries(body, pb.start_char, pb.end_char)
+        if start < prev_end or start >= end:
+            raise HTTPException(status_code=400, detail="Invalid part boundaries")
+        secs = _estimate_seconds(body[start:end].strip())
+        if secs < MIN_PART_SECONDS or secs > MAX_PART_SECONDS:
+            raise HTTPException(status_code=400, detail="Part duration out of bounds")
+        bounds.append((start, end))
+        prev_end = end
+
+    existing_parts = session.exec(
+        select(StoryPart).where(StoryPart.story_id == story_id)
+    ).all()
+    for part in existing_parts:
+        session.delete(part)
+
+    parts_models: list[StoryPart] = []
+    for idx, (start, end) in enumerate(bounds, 1):
+        text = body[start:end].strip()
+        secs = _estimate_seconds(text)
+        part = StoryPart(
+            story_id=story_id,
+            index=idx,
+            body_md=text,
+            est_seconds=secs,
+            start_char=start,
+            end_char=end,
+        )
+        session.add(part)
+        parts_models.append(part)
+    session.commit()
+    for p in parts_models:
+        session.refresh(p)
+    return parts_models
 
 
 @router.post("/{story_id}/enqueue-series", status_code=status.HTTP_202_ACCEPTED)
