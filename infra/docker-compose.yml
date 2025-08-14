@@ -67,15 +67,32 @@ services:
     build:
       context: ..
       dockerfile: services/renderer/Dockerfile
+    command: python -u services/renderer/poller.py
     env_file: ../.env
+    environment:
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
     volumes:
+      - ../content:/content:ro
       - ../output:/output
-      - ../content:/content
+      - ../content/tts_cache:/content/tts_cache
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       api:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "services.renderer.healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - renderer
 
   uploader:
     build:
