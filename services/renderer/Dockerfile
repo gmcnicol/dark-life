@@ -32,4 +32,4 @@ VOLUME ["/output"]
 
 CMD ["python", "-u", "services/renderer/poller.py"]
 
-HEALTHCHECK CMD python -c "exit(0)"
+HEALTHCHECK CMD ["python", "-m", "services.renderer.healthcheck"]

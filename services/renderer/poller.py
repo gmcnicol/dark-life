@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import threading
 import time
 import uuid
 import random
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import requests
 
@@ -16,6 +19,8 @@ from shared.logging import log_error, log_info
 
 
 HEARTBEAT_INTERVAL = 10  # seconds
+DISK_MIN_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+HEARTBEAT_FILE = Path(settings.TMP_DIR) / "worker_heartbeat"
 
 
 def backoff_schedule(
@@ -34,6 +39,27 @@ def _headers() -> dict[str, str]:
     if settings.API_AUTH_TOKEN:
         return {"Authorization": f"Bearer {settings.API_AUTH_TOKEN}"}
     return {}
+
+
+def _check_disk(job_id: int | str, cid: str) -> bool:
+    """Ensure ``TMP_DIR`` has at least ``DISK_MIN_BYTES`` free."""
+    usage = shutil.disk_usage(settings.TMP_DIR)
+    if usage.free < DISK_MIN_BYTES:
+        if getattr(settings, "DEBUG", False):
+            try:
+                out = subprocess.run(
+                    ["df", "-h"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=False,
+                )
+                log_info("df", cid=cid, job_id=job_id, output=out.stdout)
+            except Exception as exc:  # pragma: no cover - df missing
+                log_error("df_error", cid=cid, job_id=job_id, error=str(exc))
+        log_error("disk_low", cid=cid, job_id=job_id, free_bytes=usage.free)
+        return False
+    return True
 
 
 def poll_jobs(session: requests.sessions.Session | None = None) -> list[dict]:
@@ -91,6 +117,9 @@ def process_job(job: dict, session: requests.sessions.Session | None = None) -> 
     base = settings.API_BASE_URL.rstrip("/")
     job_id = job.get("id")
     cid = str(uuid.uuid4())
+    if not _check_disk(job_id, cid):
+        return
+    job_dir = Path(settings.TMP_DIR) / str(job_id)
     try:
         resp = sess.post(
             f"{base}/api/render-jobs/{job_id}/claim",
@@ -104,6 +133,7 @@ def process_job(job: dict, session: requests.sessions.Session | None = None) -> 
         resp.raise_for_status()
         log_info("claim", cid=cid, job_id=job_id)
 
+        job_dir.mkdir(parents=True, exist_ok=True)
         stop = threading.Event()
         lost = [False]
         hb_thread = threading.Thread(
@@ -156,15 +186,20 @@ def process_job(job: dict, session: requests.sessions.Session | None = None) -> 
             )
         finally:
             pass
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
 
 
 def run() -> None:  # pragma: no cover - continuous loop
     """Continuously poll for jobs and process them respecting concurrency."""
     log_info("start", cid="poller")
+    HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    HEARTBEAT_FILE.touch()
     backoff = backoff_schedule(settings.POLL_INTERVAL_MS, factor=1.0)
     with ThreadPoolExecutor(max_workers=settings.MAX_CONCURRENT) as pool:
         running: dict[int, threading.Future] = {}
         while True:
+            HEARTBEAT_FILE.touch()
             jobs = poll_jobs()
             for job in jobs:
                 job_id = job.get("id")
