@@ -27,3 +27,19 @@ jobs:
         run: "! grep -R 'ADMIN_API_TOKEN\|ELEVENLABS_API_KEY\|API_AUTH_TOKEN' apps/web/.next"
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install . pytest httpx
+      - name: Run tests
+        run: |
+          API_AUTH_TOKEN=sekrit ELEVENLABS_API_KEY=apikey pytest -q | tee pytest.log
+      - name: Ensure secrets not logged
+        run: "! grep -R 'sekrit\|apikey' pytest.log"
