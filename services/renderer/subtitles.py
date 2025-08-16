@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
 
+import requests
+
 try:  # Optional dependency; tests may patch
     from faster_whisper import WhisperModel  # type: ignore
 except Exception:  # pragma: no cover - faster-whisper not installed
@@ -137,6 +139,29 @@ def _write_vtt(segments: Iterable[Segment], dest: Path) -> None:
     dest.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _openai_transcribe(audio_path: Path) -> List[Segment]:
+    """Transcribe ``audio_path`` using the OpenAI Whisper API."""
+
+    headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
+    data = {"model": "whisper-1", "response_format": "verbose_json"}
+    with audio_path.open("rb") as fh:
+        files = {"file": (audio_path.name, fh, "audio/wav")}
+        resp = requests.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=300,
+        )
+    resp.raise_for_status()
+    payload = resp.json()
+    segs = [
+        Segment(float(seg["start"]), float(seg["end"]), seg["text"])
+        for seg in payload.get("segments", [])
+    ]
+    return segs
+
+
 def generate(*, job_id: str | int, part_id: str | int, video_path: Path | None = None) -> Path:
     """Transcribe ``vo.wav`` for ``job_id`` and produce subtitles.
 
@@ -153,11 +178,15 @@ def generate(*, job_id: str | int, part_id: str | int, video_path: Path | None =
     fmt = settings.SUBTITLES_FORMAT.lower()
     sub_path = job_dir / f"{part_id}.{fmt}"
 
-    model = WhisperModel(settings.WHISPER_MODEL, device=settings.WHISPER_DEVICE)
-    raw_segments, _info = model.transcribe(str(vo_path))
-    segments = _merge_short_segments(
-        Segment(seg.start, seg.end, seg.text) for seg in raw_segments
-    )
+    if settings.OPENAI_API_KEY:
+        raw_segments = _openai_transcribe(vo_path)
+        segments = _merge_short_segments(raw_segments)
+    else:
+        model = WhisperModel(settings.WHISPER_MODEL, device=settings.WHISPER_DEVICE)
+        raw_segments, _info = model.transcribe(str(vo_path))
+        segments = _merge_short_segments(
+            Segment(seg.start, seg.end, seg.text) for seg in raw_segments
+        )
 
     if fmt == "srt":
         _write_srt(segments, sub_path)

@@ -43,7 +43,9 @@ def _headers() -> dict[str, str]:
 
 def _check_disk(job_id: int | str, cid: str) -> bool:
     """Ensure ``TMP_DIR`` has at least ``DISK_MIN_BYTES`` free."""
-    usage = shutil.disk_usage(settings.TMP_DIR)
+    tmp = Path(settings.TMP_DIR)
+    tmp.mkdir(parents=True, exist_ok=True)
+    usage = shutil.disk_usage(tmp)
     if usage.free < DISK_MIN_BYTES:
         if getattr(settings, "DEBUG", False):
             try:

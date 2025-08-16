@@ -76,7 +76,7 @@ class Settings(BaseSettings):
         default="darklife/1.0", description="User agent for Reddit API"
     )
     API_BASE_URL: str = Field(
-        default="",
+        default="http://api:8000",
         description="Base URL for the Dark Life API (used by ingestors)",
     )
     API_AUTH_TOKEN: str = Field(
@@ -157,6 +157,10 @@ class Settings(BaseSettings):
     )
     SUBTITLES_BURN_IN: bool = Field(
         default=False, description="Burn subtitles into video when true"
+    )
+    OPENAI_API_KEY: str = Field(
+        default="",
+        description="OpenAI API key for Whisper API",
     )
 
     # Compatibility attribute; ``ADMIN_API_TOKEN`` is retained as a property
