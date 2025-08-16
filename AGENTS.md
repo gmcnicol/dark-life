@@ -38,7 +38,7 @@ Environment & Configuration (authoritative, consistent names)
 - LEASE_SECONDS=180
 
 # API access (used by renderer worker; NEVER exposed to browser)
-- API_BASE_URL=https://api.example.com    # e.g. http://api:8000
+- API_BASE_URL=http://api:8000
 - API_AUTH_TOKEN=...                      # admin/poller token (server/renderer only)
 
 # ElevenLabs TTS (server/renderer only)
@@ -49,13 +49,13 @@ Environment & Configuration (authoritative, consistent names)
 - TTS_RATE_LIMIT_RPS=3                    # polite backoff
 
 # Whisper ASR (server/renderer only)
+- OPENAI_API_KEY=...
 - WHISPER_MODEL=base                      # tiny|base|small|medium|large
 - WHISPER_DEVICE=cpu                      # cpu|cuda
 - SUBTITLES_FORMAT=srt                    # srt|vtt
 - SUBTITLES_BURN_IN=false                 # if true, burn into video; else sidecar
 
 # Web (Next.js) — NEVER expose admin tokens to the browser
-- NEXT_PUBLIC_API_BASE_URL=http://localhost:8000   # public base; no secrets
 - ADMIN_API_TOKEN=...                    # server-only; attached by Route Handlers
 
 Browser → Web server → API. **No direct browser → API calls that require admin auth.**

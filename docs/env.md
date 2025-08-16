@@ -33,12 +33,13 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `WHISPER_DEVICE` – device for inference (`cpu` or `cuda`)
 - `SUBTITLES_FORMAT` – subtitle format (`srt` or `vtt`)
 - `SUBTITLES_BURN_IN` – burn subtitles into video when `true`
+- `OPENAI_API_KEY` – OpenAI API key for Whisper API
 
 ## Web (Next.js)
-- `NEXT_PUBLIC_API_BASE_URL` – public API base URL
 - `ADMIN_API_TOKEN` – server-only token for admin API calls
 
 ## Secret Consumption
 - `API_AUTH_TOKEN` – attached to renderer API calls in [`services/renderer/poller.py`](../services/renderer/poller.py)
 - `ADMIN_API_TOKEN` – required by API admin endpoints such as [`apps/api/reddit_admin.py`](../apps/api/reddit_admin.py) and used by web route handlers via [`apps/web/src/app/api/admin/fetch.ts`](../apps/web/src/app/api/admin/fetch.ts)
 - `ELEVENLABS_API_KEY` – consumed by `services/renderer/tts.py`
+- `OPENAI_API_KEY` – used by `services/renderer/subtitles.py`

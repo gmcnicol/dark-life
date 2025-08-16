@@ -6,7 +6,7 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
   },
   webServer: {
-    command: "NEXT_PUBLIC_API_BASE_URL=http://localhost:3000/api pnpm dev",
+    command: "API_BASE_URL=http://localhost:3000/api pnpm dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
   },

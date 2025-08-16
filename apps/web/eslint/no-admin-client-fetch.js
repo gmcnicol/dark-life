@@ -5,7 +5,7 @@ const rule = {
       description: "disallow direct client fetches to admin endpoints",
     },
     messages: {
-      forbidden: "Use /api/admin route handlers instead of fetching NEXT_PUBLIC_API_BASE_URL/admin",
+      forbidden: "Use /api/admin route handlers instead of fetching API_BASE_URL/admin",
     },
   },
   create(context) {
@@ -18,7 +18,7 @@ const rule = {
         node.object.property.type === "Identifier" &&
         node.object.property.name === "env" &&
         node.property.type === "Identifier" &&
-        node.property.name === "NEXT_PUBLIC_API_BASE_URL"
+        node.property.name === "API_BASE_URL"
       );
     }
 
