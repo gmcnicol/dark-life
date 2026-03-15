@@ -14,8 +14,9 @@ Legacy runtimes such as the old Flask app and `video_renderer` stack have been r
 
 ## Quick start
 
-1. Copy `.env.sample` to `.env` and fill in at least:
+1. Copy `.env.example` to `.env` and fill in at least:
    - `API_AUTH_TOKEN`
+   - `ADMIN_API_TOKEN` with the same value
    - `ELEVENLABS_API_KEY`
    - `ELEVENLABS_VOICE_ID`
    - `OPENAI_API_KEY` if you want OpenAI-backed script adaptation or Whisper API transcription

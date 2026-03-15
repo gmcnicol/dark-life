@@ -12,8 +12,16 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `DEBUG` – enable verbose debugging output
 - `JOB_TIMEOUT_SEC` – maximum seconds a job may run
 - `MAX_CONCURRENT` – parallel jobs allowed per worker
+- `MAX_CLAIM` – maximum jobs to claim per polling cycle
 - `POLL_INTERVAL_MS` – poll interval for queued work
 - `LEASE_SECONDS` – lease duration for claimed jobs
+
+## Database / compose
+- `POSTGRES_USER` – Postgres user for Docker Compose
+- `POSTGRES_PASSWORD` – Postgres password for Docker Compose
+- `POSTGRES_DB` – Postgres database name for Docker Compose
+- `DATABASE_URL` – SQLAlchemy connection string
+- `REDIS_URL` – Redis URL for legacy queue consumers and local tooling
 
 ## API access
 - `API_BASE_URL` – base URL of the API service
@@ -34,9 +42,28 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `SUBTITLES_FORMAT` – subtitle format (`srt` or `vtt`)
 - `SUBTITLES_BURN_IN` – burn subtitles into video when `true`
 - `OPENAI_API_KEY` – OpenAI API key for Whisper API
+- `OPENAI_SCRIPT_MODEL` – OpenAI model used for script adaptation
 
 ## Web (Next.js)
-- `ADMIN_API_TOKEN` – server-only token for admin API calls
+- `ADMIN_API_TOKEN` – server-only token for admin API calls; normally set to the same value as `API_AUTH_TOKEN`
+
+## Reddit ingestion
+- `REDDIT_CLIENT_ID` – Reddit API client id
+- `REDDIT_CLIENT_SECRET` – Reddit API client secret
+- `REDDIT_USER_AGENT` – Reddit API user agent
+- `REDDIT_DEFAULT_SUBREDDITS` – comma-separated default subreddit list
+- `BACKFILL_USE_CLOUDSEARCH` – use cloudsearch windows during backfill
+- `BACKFILL_MAX_PAGES` – maximum pages fetched during backfill
+- `DEBUG_INGEST_SAMPLE` – log sample titles during ingest when `true`
+
+## Scheduler
+- `SCHEDULER_INTERVAL_SEC` – scheduler polling interval
+- `SCHEDULER_ENABLE_REDDIT` – enable recurring Reddit ingestion
+- `SCHEDULER_ENABLE_WEEKLY` – enable weekly compilation creation
+
+## Uploads
+- `YOUTUBE_CLIENT_SECRETS_FILE` – path to YouTube OAuth client secrets
+- `YOUTUBE_TOKEN_FILE` – path to stored YouTube OAuth token
 
 ## Secret Consumption
 - `API_AUTH_TOKEN` – attached to renderer API calls in [`services/renderer/poller.py`](../services/renderer/poller.py)
