@@ -1,86 +1,92 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import type { StoryStatus } from "@dark-life/shared-types";
-import { listStories, updateStoryStatus, type Story } from "@/lib/stories";
+import { listStories } from "@/lib/stories";
+import { STATUS_LABELS, nextWorkspaceRoute, statusTone } from "@/lib/workflow";
+import { EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 const STATUSES: StoryStatus[] = [
   "ingested",
   "scripted",
+  "approved",
   "media_ready",
   "queued",
   "publish_ready",
 ];
 
 export default function KanbanBoard() {
-  const queryClient = useQueryClient();
   const { data, isLoading, isError } = useQuery({
     queryKey: ["stories"],
-    queryFn: () => listStories(),
+    queryFn: () => listStories({ limit: 200 }),
   });
 
-  const mutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: StoryStatus }) =>
-      updateStoryStatus(id, status),
-    onMutate: async ({ id, status }) => {
-      await queryClient.cancelQueries({ queryKey: ["stories"] });
-      const previous = queryClient.getQueryData<Story[]>(["stories"]);
-      queryClient.setQueryData<Story[]>(["stories"], (old) =>
-        old ? old.map((story) => (story.id === id ? { ...story, status } : story)) : old,
-      );
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["stories"], context.previous);
-      }
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["stories"] });
-    },
-  });
+  if (isLoading) {
+    return (
+      <Panel className="min-h-48">
+        <p className="text-sm text-[var(--text-soft)]">Loading pipeline board…</p>
+      </Panel>
+    );
+  }
 
-  if (isLoading) return <p>Loading...</p>;
-  if (isError) return <p>Failed to load stories.</p>;
+  if (isError) {
+    return (
+      <Panel className="min-h-48">
+        <p className="text-sm text-rose-200">The board could not load the latest story state.</p>
+      </Panel>
+    );
+  }
+
   const stories = data ?? [];
 
   return (
-    <div className="grid gap-4 xl:grid-cols-5" data-testid="kanban-board">
-      {STATUSES.map((status) => (
-        <div
-          key={status}
-          className="min-h-80 rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            const id = Number(event.dataTransfer.getData("text/plain"));
-            if (id) {
-              mutation.mutate({ id, status });
-            }
-          }}
-        >
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.25em] text-zinc-400">
-            {status}
-          </h2>
-          <ul className="space-y-3">
-            {stories
-              .filter((story) => story.status === status)
-              .map((story) => (
-                <li key={story.id}>
-                  <div
-                    draggable
-                    onDragStart={(event) =>
-                      event.dataTransfer.setData("text/plain", String(story.id))
-                    }
-                    tabIndex={0}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3 text-sm text-zinc-100"
-                  >
-                    {story.title}
-                  </div>
-                </li>
-              ))}
-          </ul>
-        </div>
-      ))}
+    <div className="space-y-5" data-testid="kanban-board">
+      <SectionHeading
+        eyebrow="Pipeline view"
+        title="Current stage pressure"
+        description="Each column reflects a real workflow stage. Open any story directly at its next valid workspace step."
+      />
+      <div className="grid gap-4 xl:grid-cols-3 2xl:grid-cols-6">
+        {STATUSES.map((status) => {
+          const columnStories = stories.filter((story) => story.status === status);
+          return (
+            <Panel key={status} className="min-h-[18rem] space-y-4 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
+                    Stage
+                  </p>
+                  <h3 className="mt-1 text-lg font-semibold text-white">{STATUS_LABELS[status]}</h3>
+                </div>
+                <StatusBadge tone={statusTone(status)}>{columnStories.length}</StatusBadge>
+              </div>
+
+              {columnStories.length === 0 ? (
+                <EmptyState
+                  title={`Nothing in ${STATUS_LABELS[status].toLowerCase()}`}
+                  description="When stories reach this stage, they will appear here with direct workspace links."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {columnStories.map((story) => (
+                    <Link
+                      key={story.id}
+                      to={nextWorkspaceRoute(story.status, story.id, Boolean(story.active_asset_bundle_id))}
+                      className="block rounded-[1.25rem] border border-white/8 bg-white/[0.03] p-4 transition hover:-translate-y-0.5 hover:border-white/14 hover:bg-white/[0.05]"
+                    >
+                      <p className="text-sm font-semibold text-white">{story.title}</p>
+                      <p className="mt-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
+                        #{story.id} · {story.author || "Unknown"}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          );
+        })}
+      </div>
     </div>
   );
 }

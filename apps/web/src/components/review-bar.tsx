@@ -1,11 +1,20 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { StoryStatus } from "@dark-life/shared-types";
+import { Link, useNavigate } from "react-router-dom";
 import type { ScriptVersion, Story } from "@/lib/stories";
-import { generateScript, updateStoryStatus } from "@/lib/stories";
+import { generateScript, listStories, updateStoryStatus } from "@/lib/stories";
+import {
+  canApproveStory,
+  canGenerateScript,
+  canRejectStory,
+  findNextReviewStoryId,
+  STATUS_LABELS,
+  statusTone,
+} from "@/lib/workflow";
+import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 export default function ReviewBar({
   story,
@@ -14,62 +23,124 @@ export default function ReviewBar({
   story: Story;
   activeScript: ScriptVersion | null;
 }) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const canApprove = canApproveStory(story.status, Boolean(activeScript));
+  const canGenerate = canGenerateScript(story.status);
+  const canReject = canRejectStory(story.status);
 
-  const run = (action: () => Promise<unknown>) => {
+  const run = (action: () => Promise<unknown>, successMessage?: string) => {
     startTransition(async () => {
-      await action();
-      router.refresh();
+      try {
+        setError(null);
+        setSuccess(null);
+        await action();
+        await queryClient.invalidateQueries();
+        if (successMessage) {
+          setSuccess(successMessage);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Action failed";
+        if (message.includes("409")) {
+          setError("Generate the script first, then approve the story.");
+          return;
+        }
+        setError(message);
+      }
     });
   };
 
   const changeStatus = (status: StoryStatus) => {
-    run(() => updateStoryStatus(story.id, status));
+    run(() => updateStoryStatus(story.id, status), `Story moved to ${STATUS_LABELS[status].toLowerCase()}.`);
+  };
+
+  const rejectAndAdvance = () => {
+    run(async () => {
+      await updateStoryStatus(story.id, "rejected");
+      const stories = await queryClient.fetchQuery({
+        queryKey: ["stories", "review-next"],
+        queryFn: () => listStories({ limit: 200 }),
+      });
+      const nextStoryId = findNextReviewStoryId(stories, story.id);
+      navigate(nextStoryId ? `/story/${nextStoryId}/review` : "/inbox");
+    });
   };
 
   return (
-    <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+    <Panel className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <SectionHeading
+          eyebrow="Decision point"
+          title="Review bar"
+          description="This is the only place where review should mutate story state. Primary action first, destructive action explicit, and downstream navigation intentional."
+        />
+        <div className="space-y-2 text-right">
+          <span
+            data-testid="status"
+            className="inline-flex rounded-full border border-white/10 px-3 py-1.5 text-sm font-semibold text-white"
+          >
+            Status: {story.status}
+          </span>
+          <div>
+            <StatusBadge tone={statusTone(story.status)}>{STATUS_LABELS[story.status]}</StatusBadge>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
-        <span data-testid="status" className="rounded-full bg-zinc-800 px-3 py-1 text-sm">
-          Status: {story.status}
-        </span>
-        <button
-          onClick={() => run(() => generateScript(story.id))}
-          className="rounded-full bg-amber-300 px-4 py-2 text-sm font-medium text-zinc-950"
-          disabled={isPending}
+        <ActionButton
+          onClick={() => run(() => generateScript(story.id), activeScript ? "Script regenerated." : "Script generated.")}
+          disabled={isPending || !canGenerate}
         >
-          {activeScript ? "Regenerate Script" : "Generate Script"}
-        </button>
-        <button
-          onClick={() => changeStatus("approved")}
-          className="rounded-full border border-emerald-400 px-4 py-2 text-sm text-emerald-200"
-          disabled={isPending}
-        >
-          Approve Story
-        </button>
-        <button
-          onClick={() => changeStatus("rejected")}
-          className="rounded-full border border-red-400 px-4 py-2 text-sm text-red-200"
-          disabled={isPending}
-        >
-          Reject
-        </button>
+          {activeScript ? "Regenerate script" : "Generate script"}
+        </ActionButton>
+        <ActionButton onClick={() => changeStatus("approved")} tone="secondary" disabled={isPending || !canApprove}>
+          Approve story
+        </ActionButton>
+        <ActionButton onClick={rejectAndAdvance} tone="danger" disabled={isPending || !canReject}>
+          Reject and next
+        </ActionButton>
       </div>
-      <div className="flex flex-wrap gap-3 text-sm text-zinc-300">
-        <Link href={`/story/${story.id}/split`} className="underline underline-offset-4">
-          Edit Parts
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <Link to={`/story/${story.id}/split`} className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]">
+          <p className="text-sm font-semibold text-white">Edit parts</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Timing and sections</p>
         </Link>
-        <Link href={`/story/${story.id}/media`} className="underline underline-offset-4">
-          Choose Media
+        <Link to={`/story/${story.id}/media`} className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]">
+          <p className="text-sm font-semibold text-white">Choose media</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Asset bundle</p>
         </Link>
-        <Link href={`/story/${story.id}/queue`} className="underline underline-offset-4">
-          Queue Renders
+        <Link to={`/story/${story.id}/queue`} className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]">
+          <p className="text-sm font-semibold text-white">Queue renders</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Preset and platforms</p>
         </Link>
-        <Link href={`/story/${story.id}/jobs`} className="underline underline-offset-4">
-          Track Jobs
+        <Link to={`/story/${story.id}/jobs`} className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]">
+          <p className="text-sm font-semibold text-white">Track jobs</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Queue telemetry</p>
         </Link>
       </div>
-    </div>
+
+      {success ? <StatusBadge tone="success">{success}</StatusBadge> : null}
+      {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+      {!canGenerate ? (
+        <p className="text-sm text-[var(--text-soft)]">
+          Script generation is disabled because this story has already moved beyond the editable review stages.
+        </p>
+      ) : null}
+      {!canApprove && !activeScript ? (
+        <p className="text-sm text-[var(--text-soft)]">
+          Approval stays locked until a narrator-ready script exists for the current story.
+        </p>
+      ) : null}
+      {story.status === "approved" ? (
+        <p className="text-sm text-[var(--text-soft)]">
+          Story approved. Move into parts or media to continue downstream production.
+        </p>
+      ) : null}
+    </Panel>
   );
 }

@@ -35,6 +35,35 @@ class NormalizationConfig:
     max_body_chars: int = int(os.getenv("MAX_BODY_CHARS", "3500"))
 
 
+HELP_SEEKING_TITLE_PATTERNS = [
+    r"\bam i\b",
+    r"\baio\b",
+    r"\baita\b",
+    r"\bneed advice\b",
+    r"\bneed help\b",
+    r"\bplease help\b",
+    r"\bwhat should i do\b",
+    r"\bshould i\b",
+    r"\bhow do i\b",
+    r"\bis it normal\b",
+    r"\bmy (wife|husband|boyfriend|girlfriend|partner|dad|mom|mother|father)\b",
+]
+
+VENT_BODY_PATTERNS = [
+    r"\bi feel (?:worthless|useless|lost|broken|empty|alone)\b",
+    r"\bi need advice\b",
+    r"\bi need help\b",
+    r"\bplease help me\b",
+    r"\bi don't know what to do\b",
+    r"\bi just needed to vent\b",
+    r"\bi needed to get this off my chest\b",
+    r"\bmental health\b",
+    r"\bpanic attack\b",
+    r"\btherapy\b",
+    r"\bdivorce papers\b",
+]
+
+
 @dataclass
 class NormalizedPost:
     """Post representation after normalization."""
@@ -72,6 +101,17 @@ def normalize_markdown(text: str) -> str:
     # Collapse whitespace (including newlines) to single spaces
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def looks_like_help_or_vent_post(title: str, body: str) -> bool:
+    haystacks = [title.lower(), body.lower()]
+    for pattern in HELP_SEEKING_TITLE_PATTERNS:
+        if re.search(pattern, haystacks[0]):
+            return True
+    for pattern in VENT_BODY_PATTERNS:
+        if re.search(pattern, haystacks[1]):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +156,8 @@ def normalize_post(
         return None, "too_short"
     if body_len > cfg.max_body_chars:
         return None, "too_long"
+    if looks_like_help_or_vent_post(title, body):
+        return None, "help_or_vent"
 
     try:
         language = detect(f"{title} {body}")
@@ -140,5 +182,6 @@ __all__ = [
     "NormalizationConfig",
     "NormalizedPost",
     "normalize_markdown",
+    "looks_like_help_or_vent_post",
     "normalize_post",
 ]

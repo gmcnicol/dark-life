@@ -31,6 +31,7 @@ def insert_post(payload: Dict[str, Any]) -> bool:
     story = {
         "external_id": payload["reddit_id"],
         "source": "reddit",
+        "subreddit": payload.get("subreddit"),
         "title": payload["title"],
         "author": payload.get("author"),
         "created_utc": int(payload["created_utc"].timestamp())

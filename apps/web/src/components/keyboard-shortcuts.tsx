@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { logEvent } from "@/lib/log";
 
 export default function KeyboardShortcuts() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const awaiting = useRef(false);
 
   useEffect(() => {
@@ -16,10 +16,10 @@ export default function KeyboardShortcuts() {
       }
       if (awaiting.current) {
         if (e.key === "i") {
-          router.push("/inbox");
+          navigate("/inbox");
           logEvent("shortcut", { keys: "g i" });
         } else if (e.key === "b") {
-          router.push("/board");
+          navigate("/board");
           logEvent("shortcut", { keys: "g b" });
         }
         awaiting.current = false;
@@ -36,7 +36,7 @@ export default function KeyboardShortcuts() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [router]);
+  }, [navigate]);
 
   return null;
 }

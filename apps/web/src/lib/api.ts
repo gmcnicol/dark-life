@@ -2,11 +2,13 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (!path.startsWith("/")) {
     throw new Error("apiFetch path must start with '/'");
   }
-  const url =
-    typeof window === "undefined"
-      ? `http://localhost:3000/api${path}`
-      : `/api${path}`;
-  const res = await fetch(url, init);
+  const base =
+    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || "/api";
+  const url = base.startsWith("http") ? `${base}${path}` : `${base}${path}`;
+  const res = await fetch(url, {
+    ...init,
+    cache: init?.cache ?? "no-store",
+  });
   if (!res.ok) {
     throw new Error(`API request failed with ${res.status}`);
   }

@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import type { Story, StoryPart } from "@/lib/stories";
 import { replaceStoryParts } from "@/lib/stories";
+import { canEditParts, STATUS_LABELS } from "@/lib/workflow";
+import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 export default function SplitEditor({
   story,
@@ -12,11 +15,23 @@ export default function SplitEditor({
   story: Story;
   parts: StoryPart[];
 }) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [rows, setRows] = useState(() =>
     parts.length > 0 ? parts.map((part) => part.body_md) : [story.body_md || ""],
   );
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const canEdit = canEditParts(story.status, Boolean(story.active_script_version_id));
+
+  const totalSeconds = useMemo(
+    () =>
+      rows.reduce((sum, row) => {
+        const words = row.split(/\s+/).filter(Boolean).length;
+        return sum + Math.max(1, Math.round(words / 2.6));
+      }, 0),
+    [rows],
+  );
 
   const updateRow = (index: number, value: string) => {
     setRows((current) => current.map((row, i) => (i === index ? value : row)));
@@ -28,59 +43,110 @@ export default function SplitEditor({
 
   const handleSave = () => {
     startTransition(async () => {
-      await replaceStoryParts(
-        story.id,
-        rows
-          .map((body_md) => body_md.trim())
-          .filter(Boolean)
-          .map((body_md) => ({ body_md, approved: true })),
-      );
-      router.refresh();
+      try {
+        setError(null);
+        await replaceStoryParts(
+          story.id,
+          rows
+            .map((body_md) => body_md.trim())
+            .filter(Boolean)
+            .map((body_md) => ({ body_md, approved: true })),
+        );
+        await queryClient.invalidateQueries({ queryKey: ["story-overview", story.id] });
+        await queryClient.invalidateQueries({ queryKey: ["story", story.id] });
+        await queryClient.invalidateQueries({ queryKey: ["stories"] });
+        navigate(`/story/${story.id}/review?saved=parts`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save parts");
+      }
     });
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <span data-testid="status" className="rounded-full bg-zinc-800 px-3 py-1 text-sm">
-          Status: {story.status}
-        </span>
-        <button
-          onClick={addPart}
-          className="rounded-full border border-zinc-700 px-4 py-2 text-sm text-zinc-200"
-        >
-          Add Part
-        </button>
-      </div>
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
       <div className="space-y-4">
-        {rows.map((row, index) => (
-          <div key={index} className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.25em] text-zinc-500">
-              <span>Part {index + 1}</span>
-              {rows.length > 1 ? (
-                <button onClick={() => removePart(index)} className="text-red-300">
-                  Remove
-                </button>
-              ) : null}
-            </div>
-            <textarea
-              className="min-h-48 w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm leading-7 text-zinc-100"
-              value={row}
-              onChange={(event) => updateRow(index, event.target.value)}
+        <Panel className="space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <SectionHeading
+              eyebrow="Part timing"
+              title="Split editor"
+              description="Break the narration into clean sections before media assignment. Keep the pacing legible and the approximate runtime inside short-form bounds."
             />
-            <p className="mt-2 text-xs text-zinc-500">
-              Approx. {Math.max(1, Math.round(row.split(/\s+/).filter(Boolean).length / 2.6))} seconds
-            </p>
+            <div className="space-y-2 text-right">
+              <span data-testid="status" className="inline-flex rounded-full border border-white/10 px-3 py-1.5 text-sm font-semibold text-white">
+                Status: {story.status}
+              </span>
+              <div>
+                <StatusBadge tone="neutral">{STATUS_LABELS[story.status]}</StatusBadge>
+              </div>
+            </div>
           </div>
-        ))}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <ActionButton onClick={addPart} tone="secondary" disabled={!canEdit}>
+              Add part
+            </ActionButton>
+            <ActionButton onClick={handleSave} disabled={isPending || !canEdit}>
+              {isPending ? "Saving parts…" : "Save parts"}
+            </ActionButton>
+          </div>
+          {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+          {!canEdit ? (
+            <p className="text-sm text-[var(--text-soft)]">
+              Part editing stays available only after script generation and before downstream media work has started.
+            </p>
+          ) : null}
+        </Panel>
+
+        <div className="space-y-4">
+          {rows.map((row, index) => {
+            const seconds = Math.max(1, Math.round(row.split(/\s+/).filter(Boolean).length / 2.6));
+            return (
+              <Panel key={index} className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+                      Part {index + 1}
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--text-soft)]">Approx. {seconds} seconds</p>
+                  </div>
+                  {rows.length > 1 ? (
+                    <ActionButton onClick={() => removePart(index)} tone="ghost" disabled={!canEdit}>
+                      Remove
+                    </ActionButton>
+                  ) : null}
+                </div>
+                <textarea
+                  className="min-h-52 w-full rounded-[1.4rem] border border-white/10 bg-black/15 p-4 text-sm leading-7 text-white outline-none transition focus:border-cyan-300/35 focus:ring-2 focus:ring-cyan-300/20"
+                  value={row}
+                  disabled={!canEdit}
+                  onChange={(event) => updateRow(index, event.target.value)}
+                />
+              </Panel>
+            );
+          })}
+        </div>
       </div>
-      <button
-        onClick={handleSave}
-        disabled={isPending}
-        className="rounded-full bg-zinc-100 px-5 py-3 text-sm font-medium text-zinc-950"
-      >
-        Save Parts
-      </button>
+
+      <Panel className="h-fit space-y-4">
+        <SectionHeading
+          eyebrow="Runtime check"
+          title="Split summary"
+          description="Keep the part count and estimated runtime obvious while editing."
+        />
+        <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+            Parts
+          </p>
+          <p className="mt-2 font-display text-4xl text-white">{rows.length}</p>
+        </div>
+        <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+            Estimated total
+          </p>
+          <p className="mt-2 font-display text-4xl text-white">{totalSeconds}s</p>
+        </div>
+      </Panel>
     </div>
   );
 }

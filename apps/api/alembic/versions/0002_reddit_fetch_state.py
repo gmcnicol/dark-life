@@ -3,6 +3,7 @@
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import inspect
 
 revision = "0002_reddit_fetch_state"
 down_revision = "0001_initial"
@@ -11,6 +12,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if inspector.has_table("reddit_fetch_state"):
+        return
     op.create_table(
         "reddit_fetch_state",
         sa.Column("id", PG_UUID(as_uuid=True), primary_key=True),

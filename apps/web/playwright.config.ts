@@ -6,7 +6,7 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
   },
   webServer: {
-    command: "API_BASE_URL=http://localhost:3000/api pnpm dev",
+    command: "VITE_API_BASE_URL=/api pnpm dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
   },

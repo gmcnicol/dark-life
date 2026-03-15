@@ -29,6 +29,7 @@ def require_token(authorization: str = Header(...)) -> None:
 class StoryIn(BaseModel):
     external_id: str
     source: str
+    subreddit: str | None = None
     title: str
     author: str | None = None
     created_utc: int
@@ -52,6 +53,7 @@ def upsert_story(
     if story:
         changed = False
         for attr, value in {
+            "subreddit": payload.subreddit,
             "title": payload.title,
             "author": payload.author,
             "body_md": payload.text,
@@ -72,6 +74,7 @@ def upsert_story(
     story = Story(
         external_id=payload.external_id,
         source=payload.source,
+        subreddit=payload.subreddit,
         title=payload.title,
         author=payload.author,
         created_utc=datetime.fromtimestamp(payload.created_utc, tz=timezone.utc),

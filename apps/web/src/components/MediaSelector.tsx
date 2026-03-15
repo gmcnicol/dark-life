@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Asset, Story, StoryPart } from "@/lib/stories";
 import { createAssetBundle } from "@/lib/stories";
+import { canManageMedia, STATUS_LABELS } from "@/lib/workflow";
+import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 export default function MediaSelector({
   story,
@@ -14,11 +16,13 @@ export default function MediaSelector({
   parts: StoryPart[];
   assets: Asset[];
 }) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<number[]>(() =>
     assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.id),
   );
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const canSave = canManageMedia(story.status);
 
   const previewAssets = useMemo(
     () => selected.map((id) => assets.find((asset) => asset.id === id)).filter(Boolean) as Asset[],
@@ -26,48 +30,73 @@ export default function MediaSelector({
   );
 
   const toggleAsset = (id: number) => {
+    if (!canSave) {
+      return;
+    }
     setSelected((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );
   };
 
   const autoAssign = () => {
+    if (!canSave) {
+      return;
+    }
     setSelected(assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.id));
   };
 
   const saveBundle = () => {
     startTransition(async () => {
-      await createAssetBundle(story.id, {
-        name: "Primary bundle",
-        asset_ids: selected,
-      });
-      router.refresh();
+      try {
+        setError(null);
+        await createAssetBundle(story.id, {
+          name: "Primary bundle",
+          asset_ids: selected,
+        });
+        await queryClient.invalidateQueries();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save bundle");
+      }
     });
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <span data-testid="status" className="rounded-full bg-zinc-800 px-3 py-1 text-sm">
-          Status: {story.status}
-        </span>
-        <button
-          onClick={autoAssign}
-          className="rounded-full border border-zinc-700 px-4 py-2 text-sm text-zinc-200"
-        >
-          Apply Best Matches
-        </button>
-        <button
-          onClick={saveBundle}
-          disabled={isPending || selected.length === 0}
-          className="rounded-full bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950"
-        >
-          Save Bundle
-        </button>
-      </div>
+    <div className="space-y-4">
+      <Panel className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <SectionHeading
+            eyebrow="Media assignment"
+            title="Asset bundle"
+            description="Choose the supporting visual set for each story section, then lock the bundle so the queue stage can render against a stable media package."
+          />
+          <div className="space-y-2 text-right">
+            <span data-testid="status" className="inline-flex rounded-full border border-white/10 px-3 py-1.5 text-sm font-semibold text-white">
+              Status: {story.status}
+            </span>
+            <div>
+              <StatusBadge tone="neutral">{STATUS_LABELS[story.status]}</StatusBadge>
+            </div>
+          </div>
+        </div>
 
-      <section className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <ActionButton onClick={autoAssign} tone="secondary" disabled={!canSave}>
+            Apply best matches
+          </ActionButton>
+          <ActionButton onClick={saveBundle} disabled={isPending || selected.length === 0 || !canSave}>
+            {isPending ? "Saving bundle…" : "Save bundle"}
+          </ActionButton>
+        </div>
+        {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+        {!canSave ? (
+          <p className="text-sm text-[var(--text-soft)]">
+            Media selection unlocks after approval and freezes once renders have been queued.
+          </p>
+        ) : null}
+      </Panel>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
+        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {assets.map((asset) => {
             const selectedAsset = selected.includes(asset.id);
             const previewSrc = asset.local_path || asset.remote_url || "";
@@ -76,27 +105,27 @@ export default function MediaSelector({
                 key={asset.id}
                 type="button"
                 onClick={() => toggleAsset(asset.id)}
+                disabled={!canSave}
                 data-testid={selectedAsset ? `catalog-img-${asset.id}` : undefined}
-                className={`overflow-hidden rounded-3xl border p-3 text-left transition ${
+                className={`overflow-hidden rounded-[1.6rem] border p-3 text-left transition ${
                   selectedAsset
-                    ? "border-amber-300 bg-amber-100/10"
-                    : "border-zinc-800 bg-zinc-950/70"
-                }`}
+                    ? "border-cyan-300/35 bg-cyan-300/[0.08]"
+                    : "border-white/8 bg-white/[0.03] hover:border-white/14 hover:bg-white/[0.05]"
+                } ${!canSave ? "cursor-not-allowed opacity-60" : ""}`}
               >
-                <div className="aspect-[9/16] overflow-hidden rounded-2xl bg-zinc-900">
+                <div className="aspect-[9/16] overflow-hidden rounded-[1.2rem] bg-black/20">
                   {asset.type === "video" ? (
                     <video src={previewSrc} muted className="h-full w-full object-cover" />
                   ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={previewSrc} alt="" className="h-full w-full object-cover" />
                   )}
                 </div>
                 <div className="mt-3 space-y-1">
-                  <p className="text-sm font-medium text-zinc-100">
+                  <p className="text-sm font-semibold text-white">
                     {asset.orientation || asset.type}
                   </p>
-                  <p className="text-xs text-zinc-400">
-                    {(asset.tags || []).slice(0, 4).join(" · ") || "local library"}
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
+                    {(asset.tags || []).slice(0, 4).join(" · ") || "library asset"}
                   </p>
                 </div>
               </button>
@@ -104,19 +133,23 @@ export default function MediaSelector({
           })}
         </div>
 
-        <aside className="space-y-4 rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4">
-          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Bundle Preview</p>
+        <Panel className="h-fit space-y-4">
+          <SectionHeading
+            eyebrow="Preview"
+            title="Part-to-media map"
+            description="Check which selected asset will carry each part before locking the bundle."
+          />
           {parts.map((part, index) => {
             const asset = previewAssets[index] || previewAssets[0];
             return (
-              <div key={part.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                <p className="mb-2 text-xs uppercase tracking-[0.25em] text-zinc-500">
+              <div key={part.id} className="rounded-[1.3rem] border border-white/8 bg-white/[0.03] p-4">
+                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
                   Part {part.index}
                 </p>
-                <p className="mb-3 line-clamp-4 text-sm leading-6 text-zinc-200">
+                <p className="mt-2 line-clamp-4 text-sm leading-6 text-white">
                   {part.script_text || part.body_md}
                 </p>
-                <p className="text-xs text-zinc-500">
+                <p className="mt-3 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
                   {asset
                     ? `${asset.type} · ${(asset.tags || []).slice(0, 4).join(", ")}`
                     : "No media selected"}
@@ -124,7 +157,7 @@ export default function MediaSelector({
               </div>
             );
           })}
-        </aside>
+        </Panel>
       </section>
     </div>
   );

@@ -132,10 +132,16 @@ export interface StoryOverview {
   artifacts: RenderArtifact[];
 }
 
-export async function listStories(params: { status?: string } = {}): Promise<Story[]> {
+export async function listStories(params: { status?: string; page?: number; limit?: number } = {}): Promise<Story[]> {
   const searchParams = new URLSearchParams();
   if (params.status) {
     searchParams.set("status", params.status);
+  }
+  if (params.page) {
+    searchParams.set("page", String(params.page));
+  }
+  if (params.limit) {
+    searchParams.set("limit", String(params.limit));
   }
   const search = searchParams.toString();
   return apiFetch<Story[]>(`/stories${search ? `?${search}` : ""}`);

@@ -18,26 +18,22 @@ RUN pnpm install --frozen-lockfile --filter web...
 COPY . .
 RUN pnpm --filter web build
 
-# prune dev dependencies
-RUN pnpm prune --prod --filter web...
-
 # Runner stage
 FROM node:22-alpine AS runner
-WORKDIR /app
+WORKDIR /app/apps/web
+
+ENV NODE_ENV=production
 
 # install pnpm for runtime scripts
 RUN npm install -g pnpm
-ENV NODE_ENV=production
 
-# copy built application and production deps
-COPY --from=builder /app/apps/web/.next ./.next
-COPY --from=builder /app/apps/web/public ./public
-COPY --from=builder /app/apps/web/next.config.ts ./next.config.ts
+# copy built application and runtime deps
+COPY --from=builder /app/node_modules /app/node_modules
+COPY --from=builder /app/apps/web/dist ./dist
 COPY --from=builder /app/apps/web/package.json ./package.json
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/web/node_modules ./node_modules
 
-# set runtime variables
 ENV PORT=3000
 EXPOSE 3000
 
-CMD ["pnpm", "start"]
+CMD ["./node_modules/.bin/vite", "preview", "--host", "0.0.0.0", "--port", "3000"]
