@@ -16,7 +16,7 @@ from .models import Job
 
 router = APIRouter(prefix="/admin/reddit", tags=["admin-reddit"])
 
-ADMIN_TOKEN = os.getenv("ADMIN_API_TOKEN")
+ADMIN_TOKEN = os.getenv("API_AUTH_TOKEN") or os.getenv("ADMIN_API_TOKEN")
 
 
 def require_token(authorization: str = Header(...)) -> None:

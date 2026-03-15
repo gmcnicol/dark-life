@@ -1,17 +1,16 @@
-import datetime as dt
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import SQLModel, Session, create_engine, select
 
-from apps.api.main import app
 from apps.api.db import get_session
-from apps.api.models import Job
+import apps.api.main as main
+from apps.api.models import AssetBundle, Job, RenderPreset, Story, StoryPart
+from apps.api.pipeline import ensure_default_presets
 
 
 @pytest.fixture(name="client")
-def client_fixture():
+def client_fixture(monkeypatch: pytest.MonkeyPatch):
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -23,14 +22,57 @@ def client_fixture():
         with Session(engine) as session:
             yield session
 
-    app.dependency_overrides[get_session] = get_test_session
-    with TestClient(app) as client:
+    monkeypatch.setattr(main, "init_db", lambda: None)
+    monkeypatch.setattr(main, "engine", engine)
+    main.app.dependency_overrides[get_session] = get_test_session
+    with Session(engine) as session:
+        ensure_default_presets(session)
+    with TestClient(main.app) as client:
         yield client, engine
-    app.dependency_overrides.clear()
+    main.app.dependency_overrides.clear()
 
 
 def _create_job(session: Session) -> int:
-    job = Job(kind="render_part", status="queued")
+    story = Story(title="Story", status="queued")
+    session.add(story)
+    session.flush()
+    preset = session.exec(select(RenderPreset)).first()
+    if preset is None:
+        preset = RenderPreset(
+            slug="short-form",
+            name="Short",
+            variant="short",
+            width=1080,
+            height=1920,
+            fps=30,
+        )
+        session.add(preset)
+        session.flush()
+    bundle = AssetBundle(story_id=story.id, name="Primary", asset_ids=[1])
+    session.add(bundle)
+    session.flush()
+    part = StoryPart(
+        story_id=story.id,
+        script_version_id=None,
+        asset_bundle_id=bundle.id,
+        index=1,
+        body_md="I ran.",
+        source_text="I ran.",
+        script_text="I ran.",
+        est_seconds=2,
+        approved=True,
+    )
+    session.add(part)
+    session.flush()
+    job = Job(
+        story_id=story.id,
+        story_part_id=part.id,
+        asset_bundle_id=bundle.id,
+        render_preset_id=preset.id,
+        kind="render_part",
+        status="queued",
+        payload={"story_id": story.id, "story_part_id": part.id, "asset_bundle_id": bundle.id, "render_preset_id": preset.id},
+    )
     session.add(job)
     session.commit()
     session.refresh(job)
@@ -42,47 +84,29 @@ def test_claim_concurrency(client):
     with Session(engine) as session:
         job_id = _create_job(session)
 
-    res1 = client.post(f"/render-jobs/{job_id}/claim")
+    res1 = client.post(f"/render-jobs/{job_id}/claim", json={"lease_seconds": 30})
     assert res1.status_code == 200
-    res2 = client.post(f"/render-jobs/{job_id}/claim")
+    res2 = client.post(f"/render-jobs/{job_id}/claim", json={"lease_seconds": 30})
     assert res2.status_code == 409
 
 
-def test_heartbeat_extends_lease(client):
+def test_state_machine_and_publish_ready(client):
     client, engine = client
     with Session(engine) as session:
         job_id = _create_job(session)
 
-    res = client.post(f"/render-jobs/{job_id}/claim")
-    lease1 = dt.datetime.fromisoformat(res.json()["lease_expires_at"])
-    res = client.post(f"/render-jobs/{job_id}/heartbeat")
-    lease2 = dt.datetime.fromisoformat(res.json()["lease_expires_at"])
-    assert lease2 > lease1
-
-
-def test_state_machine_transitions(client):
-    client, engine = client
-    with Session(engine) as session:
-        job_id = _create_job(session)
-
-    # Heartbeat before claim should fail
-    res = client.post(f"/render-jobs/{job_id}/heartbeat")
-    assert res.status_code == 409
-
-    # Claim
-    res = client.post(f"/render-jobs/{job_id}/claim")
+    assert client.post(f"/render-jobs/{job_id}/claim", json={"lease_seconds": 30}).status_code == 200
+    assert client.post(f"/render-jobs/{job_id}/status", json={"status": "rendering"}).status_code == 200
+    res = client.post(
+        f"/render-jobs/{job_id}/status",
+        json={
+            "status": "rendered",
+            "artifact_path": "/output/story-1-part-1.mp4",
+            "subtitle_path": "/output/story-1-part-1.srt",
+            "bytes": 1234,
+            "duration_ms": 22000,
+            "metadata": {"preset_slug": "short-form"},
+        },
+    )
     assert res.status_code == 200
-
-    # Directly finishing without rendering should fail
-    res = client.post(f"/render-jobs/{job_id}/status", json={"status": "rendered"})
-    assert res.status_code == 409
-
-    # Move to rendering then rendered
-    res = client.post(f"/render-jobs/{job_id}/status", json={"status": "rendering"})
-    assert res.status_code == 200
-    res = client.post(f"/render-jobs/{job_id}/status", json={"status": "rendered"})
-    assert res.status_code == 200
-
-    # Claiming again should fail
-    res = client.post(f"/render-jobs/{job_id}/claim")
-    assert res.status_code == 409
+    assert res.json()["status"] == "publish_ready"

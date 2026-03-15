@@ -1,15 +1,15 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import SQLModel, Session, create_engine
 
-from apps.api.main import app
 from apps.api.db import get_session
-from apps.api.models import Asset, Job, Story, StoryPart
+import apps.api.main as main
+from apps.api.models import ScriptVersion, Story, StoryPart
 
 
 @pytest.fixture(name="client")
-def client_fixture():
+def client_fixture(monkeypatch: pytest.MonkeyPatch):
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -21,45 +21,49 @@ def client_fixture():
         with Session(engine) as session:
             yield session
 
-    app.dependency_overrides[get_session] = get_test_session
-    with TestClient(app) as client:
+    monkeypatch.setattr(main, "init_db", lambda: None)
+    monkeypatch.setattr(main, "engine", engine)
+    main.app.dependency_overrides[get_session] = get_test_session
+    with TestClient(main.app) as client:
         yield client, engine
-    app.dependency_overrides.clear()
+    main.app.dependency_overrides.clear()
 
 
-def test_next_series_marks_running(client):
+def test_story_overview_returns_script_and_parts(client):
     client, engine = client
     with Session(engine) as session:
-        story = Story(title="Story")
+        story = Story(title="Story", body_md="I heard a noise.", status="approved")
         session.add(story)
-        session.commit()
-        session.refresh(story)
-        story_id = story.id
-        session.add(StoryPart(story_id=story.id, index=1, body_md="Hello", est_seconds=5))
-        asset = Asset(story_id=story.id, remote_url="http://img")
-        session.add(asset)
-        session.commit()
-        session.refresh(asset)
+        session.flush()
+        script = ScriptVersion(
+            story_id=story.id,
+            source_text=story.body_md or "",
+            hook="Hook",
+            narration_text="Narration",
+            outro="Outro",
+        )
+        session.add(script)
+        session.flush()
+        story.active_script_version_id = script.id
+        session.add(story)
         session.add(
-            Job(
+            StoryPart(
                 story_id=story.id,
-                kind="render_part",
-                status="queued",
-                payload={
-                    "story_id": story.id,
-                    "part_index": 1,
-                    "asset_ids": [asset.id],
-                },
+                script_version_id=script.id,
+                index=1,
+                body_md="Narration",
+                source_text="Narration",
+                script_text="Narration",
+                est_seconds=3,
+                approved=True,
             )
         )
         session.commit()
+        story_id = story.id
 
-    res = client.get("/render/next-series")
+    res = client.get(f"/stories/{story_id}/overview")
     assert res.status_code == 200
-    data = res.json()
-    assert data["story"]["id"] == story_id
-    assert data["parts"][0]["index"] == 1
-
-    with Session(engine) as session:
-        job = session.exec(select(Job)).first()
-        assert job.status == "running"
+    payload = res.json()
+    assert payload["story"]["id"] == story_id
+    assert payload["active_script"]["hook"] == "Hook"
+    assert len(payload["parts"]) == 1

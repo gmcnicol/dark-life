@@ -94,6 +94,24 @@ services:
     profiles:
       - renderer
 
+  scheduler:
+    build:
+      context: ..
+      dockerfile: services/renderer/Dockerfile
+    command: python -u services/scheduler/main.py
+    env_file: ../.env
+    environment:
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../content:/content
+      - ../output:/output
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles:
+      - scheduler
+
   uploader:
     build:
       context: ..

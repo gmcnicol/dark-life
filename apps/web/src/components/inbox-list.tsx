@@ -10,12 +10,12 @@ export default function InboxList({ stories }: { stories: Story[] }) {
   const router = useRouter();
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "j") {
-        setIndex((i) => Math.min(i + 1, stories.length - 1));
-      } else if (e.key === "k") {
-        setIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === "Enter") {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "j") {
+        setIndex((current) => Math.min(current + 1, stories.length - 1));
+      } else if (event.key === "k") {
+        setIndex((current) => Math.max(current - 1, 0));
+      } else if (event.key === "Enter") {
         const story = stories[index];
         if (story) {
           router.push(`/story/${story.id}/review`);
@@ -24,17 +24,22 @@ export default function InboxList({ stories }: { stories: Story[] }) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [index, stories, router]);
+  }, [index, router, stories]);
 
   return (
-    <ul>
-      {stories.map((story, i) => (
+    <ul className="space-y-3">
+      {stories.map((story, storyIndex) => (
         <li
           key={story.id}
-          data-selected={i === index || undefined}
-          className={i === index ? "bg-gray-200" : undefined}
+          data-selected={storyIndex === index || undefined}
+          className={`rounded-3xl border p-4 ${
+            storyIndex === index ? "border-amber-300 bg-amber-100/10" : "border-zinc-800 bg-zinc-950/70"
+          }`}
         >
-          <Link href={`/story/${story.id}/review`}>{story.title}</Link>
+          <Link href={`/story/${story.id}/review`} className="flex items-center justify-between gap-4">
+            <span className="text-lg font-medium text-zinc-100">{story.title}</span>
+            <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300">{story.status}</span>
+          </Link>
         </li>
       ))}
     </ul>

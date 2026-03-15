@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { StorySchema } from "./stories";
+import type { Story, StoryOverview } from "./stories";
 
-describe("StorySchema", () => {
-  it("parses valid story", () => {
-    const data = { id: 1, title: "t", status: "pending" };
-    expect(() => StorySchema.parse(data)).not.toThrow();
+describe("story typing fixtures", () => {
+  it("accepts canonical story statuses", () => {
+    const story: Story = { id: 1, title: "t", status: "ingested" };
+    expect(story.status).toBe("ingested");
   });
-  it("rejects invalid story", () => {
-    const data = { title: "t", status: "pending" } as unknown;
-    expect(() => StorySchema.parse(data)).toThrow();
+
+  it("captures overview collections", () => {
+    const overview: StoryOverview = {
+      story: { id: 1, title: "t", status: "scripted" },
+      active_script: null,
+      parts: [],
+      asset_bundles: [],
+      releases: [],
+      artifacts: [],
+    };
+    expect(overview.story.status).toBe("scripted");
   });
 });

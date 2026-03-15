@@ -71,11 +71,11 @@ def run(dry_run: bool = typer.Option(False, "--dry-run", is_flag=True)) -> None:
         if part_index is None:
             print("Job missing part_index; aborting")
             return
-        video_name = (job.result or {}).get("video")
-        if not video_name:
-            print("Job missing video filename; aborting")
+        artifact_path = (job.result or {}).get("artifact_path")
+        if not artifact_path:
+            print("Job missing artifact path; aborting")
             return
-        video_path = settings.VIDEO_OUTPUT_DIR / video_name
+        video_path = Path(str(artifact_path))
         if not video_path.exists():
             print(f"Video file not found: {video_path}")
             return

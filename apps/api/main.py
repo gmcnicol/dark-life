@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from time import monotonic
 
-from .db import init_db
+from .db import Session, engine, init_db
+from .pipeline import ensure_default_presets
 from .stories import router as stories_router
 from .jobs import router as jobs_router
 from .reddit_admin import router as reddit_admin_router
 from .admin_stories import router as admin_stories_router
-from .render import router as render_router
 from .render_jobs import router as render_jobs_router
 
 
@@ -21,7 +23,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("api")
 ready = False
 
-app = FastAPI(title="Dark Life API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global ready
+    init_db()
+    with Session(engine) as session:
+        ensure_default_presets(session)
+    ready = True
+    yield
+
+
+app = FastAPI(title="Dark Life API", lifespan=lifespan)
 
 
 class LogRequestsMiddleware(BaseHTTPMiddleware):
@@ -30,13 +43,16 @@ class LogRequestsMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         duration_ms = int((monotonic() - start) * 1000)
         logger.info(
-            "request",
-            extra={
-                "method": request.method,
-                "path": request.url.path,
-                "status": response.status_code,
-                "duration_ms": duration_ms,
-            },
+            json.dumps(
+                {
+                    "service": "api",
+                    "event": "request",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": duration_ms,
+                }
+            )
         )
         return response
 
@@ -46,16 +62,7 @@ app.include_router(stories_router)
 app.include_router(jobs_router)
 app.include_router(reddit_admin_router)
 app.include_router(admin_stories_router)
-app.include_router(render_router)
 app.include_router(render_jobs_router)
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    """Run database migrations before serving traffic."""
-    global ready
-    init_db()
-    ready = True
 
 
 @app.get("/healthz")

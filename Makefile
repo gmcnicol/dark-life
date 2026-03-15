@@ -38,9 +38,7 @@ renderer-logs:
 >$(COMPOSE) logs -f --tail=0 renderer
 
 renderer-run:
->$(COMPOSE) run --rm --no-deps renderer \
-    python -u video_renderer/create_slideshow.py \
-    --job-id $$JOB --story-id $$STORY --part-id $$PART --frames-dir $$FRAMES --debug
+>$(COMPOSE) run --rm --no-deps renderer python -u services/renderer/poller.py
 
 renderer-ffreport:
 >$(COMPOSE) run --rm --no-deps renderer sh -lc 'tail -F /tmp/ffreport-$$JOB.log'

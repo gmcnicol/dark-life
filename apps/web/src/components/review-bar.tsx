@@ -1,52 +1,75 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
-import type { Story } from "@/lib/stories";
-import { updateStoryStatus } from "@/lib/stories";
-import { optimisticUpdate } from "@/lib/optimistic";
+import { useTransition } from "react";
+import type { StoryStatus } from "@dark-life/shared-types";
+import type { ScriptVersion, Story } from "@/lib/stories";
+import { generateScript, updateStoryStatus } from "@/lib/stories";
 
-export default function ReviewBar({ story }: { story: Story }) {
+export default function ReviewBar({
+  story,
+  activeScript,
+}: {
+  story: Story;
+  activeScript: ScriptVersion | null;
+}) {
   const router = useRouter();
-  const [status, setStatus] = useState(story.status);
-  const [notes, setNotes] = useState("");
+  const [isPending, startTransition] = useTransition();
 
-  const changeStatus = async (next: string) => {
-    await optimisticUpdate(status, setStatus, next, () =>
-      updateStoryStatus(story.id, next, notes),
-    );
-    router.refresh();
+  const run = (action: () => Promise<unknown>) => {
+    startTransition(async () => {
+      await action();
+      router.refresh();
+    });
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "a" || e.key === "A") {
-        changeStatus("approved");
-      } else if (e.key === "r" || e.key === "R") {
-        changeStatus("rejected");
-      } else if (e.key === "s" || e.key === "S") {
-        changeStatus("pending");
-      } else if (e.key === "[") {
-        router.back();
-      } else if (e.key === "]") {
-        router.push("/inbox");
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [changeStatus, router]);
+  const changeStatus = (status: StoryStatus) => {
+    run(() => updateStoryStatus(story.id, status));
+  };
 
   return (
-    <div>
-      <span data-testid="status">Status: {status}</span>
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes"
-      />
-      <button onClick={() => changeStatus("approved")}>Approve</button>
-      <button onClick={() => changeStatus("rejected")}>Reject</button>
-      <button onClick={() => changeStatus("pending")}>Skip</button>
+    <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <span data-testid="status" className="rounded-full bg-zinc-800 px-3 py-1 text-sm">
+          Status: {story.status}
+        </span>
+        <button
+          onClick={() => run(() => generateScript(story.id))}
+          className="rounded-full bg-amber-300 px-4 py-2 text-sm font-medium text-zinc-950"
+          disabled={isPending}
+        >
+          {activeScript ? "Regenerate Script" : "Generate Script"}
+        </button>
+        <button
+          onClick={() => changeStatus("approved")}
+          className="rounded-full border border-emerald-400 px-4 py-2 text-sm text-emerald-200"
+          disabled={isPending}
+        >
+          Approve Story
+        </button>
+        <button
+          onClick={() => changeStatus("rejected")}
+          className="rounded-full border border-red-400 px-4 py-2 text-sm text-red-200"
+          disabled={isPending}
+        >
+          Reject
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-3 text-sm text-zinc-300">
+        <Link href={`/story/${story.id}/split`} className="underline underline-offset-4">
+          Edit Parts
+        </Link>
+        <Link href={`/story/${story.id}/media`} className="underline underline-offset-4">
+          Choose Media
+        </Link>
+        <Link href={`/story/${story.id}/queue`} className="underline underline-offset-4">
+          Queue Renders
+        </Link>
+        <Link href={`/story/${story.id}/jobs`} className="underline underline-offset-4">
+          Track Jobs
+        </Link>
+      </div>
     </div>
   );
 }

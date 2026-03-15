@@ -1,94 +1,86 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Story } from "@/lib/stories";
-import { splitStory } from "@/lib/stories";
-import {
-  segmentSentences,
-  splitSentences,
-  estimateDuration,
-} from "@/lib/split";
+import type { Story, StoryPart } from "@/lib/stories";
+import { replaceStoryParts } from "@/lib/stories";
 
-export default function SplitEditor({ story }: { story: Story }) {
+export default function SplitEditor({
+  story,
+  parts,
+}: {
+  story: Story;
+  parts: StoryPart[];
+}) {
   const router = useRouter();
-  const [parts, setParts] = useState<string[][]>(() => {
-    const sentences = segmentSentences(story.body_md || "");
-    return splitSentences(sentences);
-  });
-  const [status, setStatus] = useState(story.status);
+  const [rows, setRows] = useState(() =>
+    parts.length > 0 ? parts.map((part) => part.body_md) : [story.body_md || ""],
+  );
+  const [isPending, startTransition] = useTransition();
 
-  const moveHandle = (index: number, dir: -1 | 1) => {
-    setParts((prev) => {
-      const left = prev[index];
-      const right = prev[index + 1];
-      if (!left || !right) return prev;
-      if (dir === -1 && right.length > 0) {
-        const sentence = right.shift()!;
-        left.push(sentence);
-      } else if (dir === 1 && left.length > 0) {
-        const sentence = left.pop()!;
-        right.unshift(sentence);
-      }
-      return [...prev];
+  const updateRow = (index: number, value: string) => {
+    setRows((current) => current.map((row, i) => (i === index ? value : row)));
+  };
+
+  const addPart = () => setRows((current) => [...current, ""]);
+  const removePart = (index: number) =>
+    setRows((current) => current.filter((_, i) => i !== index));
+
+  const handleSave = () => {
+    startTransition(async () => {
+      await replaceStoryParts(
+        story.id,
+        rows
+          .map((body_md) => body_md.trim())
+          .filter(Boolean)
+          .map((body_md) => ({ body_md, approved: true })),
+      );
+      router.refresh();
     });
   };
 
-  const onHandleKey = (i: number, e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "ArrowLeft") moveHandle(i, -1);
-    if (e.key === "ArrowRight") moveHandle(i, 1);
-  };
-
-  const onDrop = (i: number, e: React.DragEvent<HTMLDivElement>) => {
-    const from = Number(e.dataTransfer.getData("text/plain"));
-    if (isNaN(from)) return;
-    if (from < i) {
-      for (let x = from; x < i; x++) moveHandle(x, 1);
-    } else if (from > i) {
-      for (let x = from; x > i; x--) moveHandle(x - 1, -1);
-    }
-  };
-
-  const handleSave = async () => {
-    const texts = parts.map((p) => p.join(" ").trim());
-    await splitStory(story.id, texts);
-    setStatus("split");
-    router.refresh();
-  };
-
   return (
-    <div>
-      <span data-testid="status">Status: {status}</span>
-      {parts.map((part, i) => {
-        const words = part.join(" ").split(/\s+/).filter(Boolean).length;
-        const est = estimateDuration(words);
-        const warn = est < 50 || est > 70;
-        return (
-          <div key={i} className="mb-4">
-            <p>{part.join(" ")}</p>
-            <p className={warn ? "text-red-600" : undefined}>Est: {est} sec</p>
-            {i < parts.length - 1 && (
-              <div
-                data-testid={`handle-${i}`}
-                draggable
-                onDragStart={(e) =>
-                  e.dataTransfer.setData("text/plain", String(i))
-                }
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => onDrop(i, e)}
-                tabIndex={0}
-                onKeyDown={(e) => onHandleKey(i, e)}
-                style={{
-                  height: 4,
-                  background: "gray",
-                  cursor: "col-resize",
-                }}
-              />
-            )}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span data-testid="status" className="rounded-full bg-zinc-800 px-3 py-1 text-sm">
+          Status: {story.status}
+        </span>
+        <button
+          onClick={addPart}
+          className="rounded-full border border-zinc-700 px-4 py-2 text-sm text-zinc-200"
+        >
+          Add Part
+        </button>
+      </div>
+      <div className="space-y-4">
+        {rows.map((row, index) => (
+          <div key={index} className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4">
+            <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.25em] text-zinc-500">
+              <span>Part {index + 1}</span>
+              {rows.length > 1 ? (
+                <button onClick={() => removePart(index)} className="text-red-300">
+                  Remove
+                </button>
+              ) : null}
+            </div>
+            <textarea
+              className="min-h-48 w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm leading-7 text-zinc-100"
+              value={row}
+              onChange={(event) => updateRow(index, event.target.value)}
+            />
+            <p className="mt-2 text-xs text-zinc-500">
+              Approx. {Math.max(1, Math.round(row.split(/\s+/).filter(Boolean).length / 2.6))} seconds
+            </p>
           </div>
-        );
-      })}
-      <button onClick={handleSave}>Save</button>
+        ))}
+      </div>
+      <button
+        onClick={handleSave}
+        disabled={isPending}
+        className="rounded-full bg-zinc-100 px-5 py-3 text-sm font-medium text-zinc-950"
+      >
+        Save Parts
+      </button>
     </div>
   );
 }

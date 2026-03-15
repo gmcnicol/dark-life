@@ -162,6 +162,22 @@ class Settings(BaseSettings):
         default="",
         description="OpenAI API key for Whisper API",
     )
+    OPENAI_SCRIPT_MODEL: str = Field(
+        default="gpt-4.1-mini",
+        description="OpenAI model used for script adaptation",
+    )
+    SCHEDULER_INTERVAL_SEC: int = Field(
+        default=3600,
+        description="Polling interval for recurring scheduler tasks",
+    )
+    SCHEDULER_ENABLE_REDDIT: bool = Field(
+        default=True,
+        description="Whether the scheduler should enqueue reddit incremental jobs",
+    )
+    SCHEDULER_ENABLE_WEEKLY: bool = Field(
+        default=True,
+        description="Whether the scheduler should enqueue weekly compilation jobs",
+    )
 
     # Compatibility attribute; ``ADMIN_API_TOKEN`` is retained as a property
     # so existing code referencing it continues to function. The backing

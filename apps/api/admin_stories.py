@@ -15,7 +15,7 @@ from .models import Story
 
 router = APIRouter(prefix="/admin/stories", tags=["admin-stories"])
 
-ADMIN_TOKEN = os.getenv("ADMIN_API_TOKEN")
+ADMIN_TOKEN = os.getenv("API_AUTH_TOKEN") or os.getenv("ADMIN_API_TOKEN")
 
 
 def require_token(authorization: str = Header(...)) -> None:
@@ -80,7 +80,7 @@ def upsert_story(
         nsfw=payload.nsfw,
         flair=payload.flair,
         tags=payload.tags,
-        status="draft",
+        status="ingested",
     )
     session.add(story)
     session.commit()

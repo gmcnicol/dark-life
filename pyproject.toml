@@ -29,18 +29,18 @@ dependencies = [
     "google-auth-oauthlib",
     "langdetect",
     "prometheus_client",
+    "pytest",
+    "httpx",
 ]
 
 [project.scripts]
-webapp = "webapp.main:cli"
-render-jobs = "video_renderer.render_job_runner:app"
+render-jobs = "services.renderer.poller:run"
 upload-videos = "video_uploader.cron_upload:app"
 
 [tool.setuptools]
 packages = [
     "shared",
-    "webapp",
-    "video_renderer",
+    "services",
     "video_uploader",
     "apps.api",
 ]

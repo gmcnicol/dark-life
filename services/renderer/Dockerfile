@@ -16,9 +16,9 @@ RUN pip install --no-cache-dir \
     pydantic-settings
 
 COPY services/renderer /app/services/renderer
+COPY services/scheduler /app/services/scheduler
 COPY apps/api /app/apps/api
 COPY shared /app/shared
-COPY video_renderer /app/video_renderer
 
 # Ensure project packages like "shared" are importable when running
 # the poller as a script.

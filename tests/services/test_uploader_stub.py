@@ -8,6 +8,8 @@ from video_uploader import cron_upload
 
 
 def test_cron_upload_dry_run(tmp_path, monkeypatch, capsys):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -23,14 +25,13 @@ def test_cron_upload_dry_run(tmp_path, monkeypatch, capsys):
         job = Job(
             story_id=story_id,
             kind="render_part",
-            status="success",
+            status="publish_ready",
             payload={"story_id": story_id, "part_index": 1},
+            result={"artifact_path": str(video_dir / f"{story_id}_p01.mp4")},
         )
         session.add(job)
         session.commit()
 
-    video_dir = tmp_path / "videos"
-    video_dir.mkdir()
     (video_dir / f"{story_id}_p01.mp4").write_text("video")
     monkeypatch.setattr(settings, "VIDEO_OUTPUT_DIR", video_dir)
 

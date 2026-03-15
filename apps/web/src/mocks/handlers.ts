@@ -4,13 +4,15 @@ export const handlers = [
   http.get("/api/catalog", () =>
     HttpResponse.json([
       {
-        url: "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==",
-        nsfw: false,
+        id: 1,
+        type: "image",
+        local_path: "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==",
         attribution: "img1",
       },
       {
-        url: "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==",
-        nsfw: true,
+        id: 2,
+        type: "image",
+        local_path: "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==",
         attribution: "img2",
       },
     ]),

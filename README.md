@@ -1,95 +1,44 @@
 # dark-life
 
-Monorepo for automating short-form dark storytelling videos.
+Self-hosted pipeline for turning creepy Reddit stories into first-person short-form videos and weekly YouTube compilations.
 
-The web app now includes a `/board` Kanban view with drag-and-drop status updates and global keyboard shortcuts (`g i` for inbox, `g b` for board, `/` to focus search).
+## Canonical stack
 
-## Local POC Runbook
+- `apps/api`: FastAPI workflow and worker contracts
+- `apps/web`: Next.js operator UI
+- `services/renderer`: render worker
+- `services/scheduler`: recurring ingestion and weekly compilation creation
+- `services/reddit_ingestor`: Reddit ingestion
 
-1. **Prereqs**
-   - Docker & Compose
-   - Node 20
-   - Python 3.11
-   - `ffmpeg` (only if running tools outside containers)
+Legacy runtimes such as the old Flask app and `video_renderer` stack have been removed from the active path.
 
-2. **Setup**
-   ```bash
-   cp .env.sample .env
-   ```
-   Fill any optional API keys and secrets. `API_AUTH_TOKEN` defaults to `local-admin`.
+## Quick start
 
-3. **Migrate & start**
-   ```bash
-   docker compose -f infra/docker-compose.yml build
-   make migrate   # apply migrations before starting the API
-   make up
-   ```
+1. Copy `.env.sample` to `.env` and fill in at least:
+   - `API_AUTH_TOKEN`
+   - `ELEVENLABS_API_KEY`
+   - `ELEVENLABS_VOICE_ID`
+   - `OPENAI_API_KEY` if you want OpenAI-backed script adaptation or Whisper API transcription
+2. Install dependencies:
+   - `uv sync`
+   - `pnpm install`
+3. Start the stack:
+   - `make migrate`
+   - `make up`
+   - `make renderer`
+4. Open:
+   - Web UI: [http://localhost:3000](http://localhost:3000)
+   - API health: [http://localhost:8000/readyz](http://localhost:8000/readyz)
 
-4. **Open services**
-   - Web: <http://localhost:3000>
-   - API health: <http://localhost:8000/readyz>
+## Manual testing
 
-5. **Renderer & uploader**
-   ```bash
-   make renderer      # start background renderer
-   make uploader      # run upload once
-   ```
+The detailed operator runbook lives at [docs/manual-testing-runbook.md](/Users/gareth/src/dark-life/docs/manual-testing-runbook.md).
 
-6. **Troubleshooting**
-   - `pnpm-lock.yaml not found` → web uses npm Dockerfile
-   - `psycopg not found` → ensure `psycopg[binary]` installed and rebuild API
-   - Database connection errors → `DATABASE_URL` must use host `postgres`
-   - `8000` in use → change host mapping to `8001:8000`
+## Useful commands
 
-## Running Migrations
-
-Run database migrations from the repository root once your `.env` is configured, before starting the API:
-
-```bash
-docker compose -f infra/docker-compose.yml run --rm api sh -lc 'cd apps/api && alembic upgrade head'
-```
-
-### Admin endpoints
-
-Admin APIs require `Authorization: Bearer $API_AUTH_TOKEN`.
-
-## Reddit Ingestion
-
-The Reddit ingestor uses the official API. When paging `subreddit.new()` there
-is a practical cap of roughly 1000 items; historical range queries are not
-guaranteed. Backfill performs bounded paging and optionally attempts
-cloudsearch time windows. These windows are best-effort and may return zero
-results without failing the job. Fetching deep history beyond the official API
-limits requires Pushshift or moderator-only keys.
-
-Sanity check:
-
-```bash
-docker compose -f infra/docker-compose.yml --profile ops run --rm reddit_ingestor sh -lc '
-python - <<PY
-import os,praw
-r=praw.Reddit(client_id=os.environ["REDDIT_CLIENT_ID"], client_secret=os.environ["REDDIT_CLIENT_SECRET"], user_agent=os.environ.get("REDDIT_USER_AGENT","darklife/1.0"))
-items=list(r.subreddit("nosleep").new(limit=5))
-print("fetched",len(items),"newest nosleep")
-for s in items: print(s.id, int(s.created_utc), s.title[:80])
-PY
-'
-```
-
-## Environment variables
-
-See [`.env.sample`](.env.sample) for the full list of configuration options.
-
-## Renderer & Uploader
-
-The renderer polls the database for jobs and writes videos to `./output`. Key environment defaults:
-
-- `POLL_INTERVAL_MS=5000`
-- `MAX_CONCURRENT=1`
-- `LEASE_SECONDS=120`
-- `CONTENT_DIR=/content`
-- `MUSIC_DIR=/content/audio/music`
-- `OUTPUT_DIR=/output`
-- `TMP_DIR=/tmp/renderer`
-
-Schedule the uploader with cron or CI to publish rendered parts regularly.
+- `make logs`
+- `make renderer-logs`
+- `make ingest`
+- `pnpm --dir apps/web typecheck`
+- `pnpm --dir apps/web test -- --runInBand`
+- `uv run python -m pytest -q`

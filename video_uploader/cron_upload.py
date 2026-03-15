@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlmodel import Session, create_engine
 import typer
 
@@ -35,7 +37,12 @@ def run(
             if part_index is None:
                 print("Job missing part_index; skipping")
                 break
-            video_path = settings.VIDEO_OUTPUT_DIR / f"{story.id}_p{part_index:02d}.mp4"
+            artifact_path = (job.result or {}).get("artifact_path")
+            video_path = (
+                settings.VIDEO_OUTPUT_DIR / f"{story.id}_p{part_index:02d}.mp4"
+                if not artifact_path
+                else settings.OUTPUT_DIR / Path(str(artifact_path)).name
+            )
             if not video_path.exists():
                 print(f"Video file not found: {video_path}")
                 break

@@ -7,6 +7,7 @@ from typing import Tuple, Optional
 from sqlmodel import Session, select
 
 from .models import Job, Story, Upload
+from shared.workflow import JobStatus
 
 
 def next_part_ready_for_upload(
@@ -18,7 +19,7 @@ def next_part_ready_for_upload(
     """
     jobs = session.exec(
         select(Job)
-        .where(Job.kind == "render_part", Job.status == "success")
+        .where(Job.kind == "render_part", Job.status == JobStatus.PUBLISH_READY.value)
         .order_by(Job.story_id, Job.id)
     ).all()
     for job in jobs:

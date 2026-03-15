@@ -44,9 +44,10 @@ def test_temp_dir_cleanup_success(monkeypatch, tmp_path):
     monkeypatch.setattr(poller.shutil, "disk_usage", lambda _: du)
     monkeypatch.setattr(poller, "_heartbeat_loop", _fake_hb)
 
-    def fake_render(job):
+    def fake_render(job, session=None):
         jd = Path(settings.TMP_DIR) / str(job["id"])
         (jd / "tmp.txt").write_text("hi")
+        return {}
 
     monkeypatch.setattr(poller, "render_job", fake_render)
 
@@ -62,10 +63,11 @@ def test_temp_dir_cleanup_error(monkeypatch, tmp_path):
     monkeypatch.setattr(poller, "_heartbeat_loop", _fake_hb)
     monkeypatch.setattr(settings, "JOB_TIMEOUT_SEC", 0, raising=False)
 
-    def slow_render(job):
+    def slow_render(job, session=None):
         jd = Path(settings.TMP_DIR) / str(job["id"])
         (jd / "tmp.txt").write_text("hi")
         time.sleep(0.1)
+        return {}
 
     monkeypatch.setattr(poller, "render_job", slow_render)
 
