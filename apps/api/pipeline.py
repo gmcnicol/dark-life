@@ -30,7 +30,11 @@ from .models import (
 from .publishing import delivery_mode_for_platform, short_release_schedule
 
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+CHAPTER_BREAK_RE = re.compile(r"\n\s*\n+")
 WORDS_PER_SECOND = 2.6
+SHORT_TARGET_SECONDS = 55
+SERIES_MIN_PARTS = 5
+SERIES_MAX_PARTS = 7
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".webm"}
 STOPWORDS = {
@@ -97,16 +101,11 @@ def _heuristic_first_person(text: str, title: str) -> dict[str, str]:
     body = _cleanup_source(text)
     sentences = [s.strip() for s in SENTENCE_RE.split(body) if s.strip()]
     if not sentences:
-        sentences = [body]
-    rewritten: list[str] = []
-    for sentence in sentences:
-        line = sentence
-        if not re.match(r"^(I|My|We|Our)\b", line):
-            line = f"I remember {line[0].lower() + line[1:]}" if line else line
-        rewritten.append(line)
-    narration = " ".join(rewritten).strip()
-    hook = f"I should have left sooner. {title}".strip()
-    outro = "If I ever tell this story again, it means I made it out."
+        sentences = [title.strip()] if title.strip() else [body]
+    opening = sentences[0] if sentences else title.strip()
+    narration = " ".join(sentences).strip()
+    hook = _clip_text(opening or title.strip() or "Something was wrong from the start.", 140)
+    outro = "And I still can't explain what followed."
     return {
         "hook": hook,
         "narration_text": narration,
@@ -125,9 +124,19 @@ def generate_script_payload(story: Story) -> dict[str, str]:
         return _heuristic_first_person(source_text, story.title)
 
     prompt = (
-        "Rewrite the Reddit story into a first-person creepy voiceover script. "
+        "You are the head writer for Dark Life Stories, creating premium horror narration for short-form vertical video. "
+        "Rewrite the source into an aggressive, highly engaging first-person narrative built to serialize across 5 to 7 shorts/reels. "
         "Return strict JSON with keys hook, narration_text, outro. "
-        "Keep it concise, cinematic, and suitable for short-form narration."
+        "Requirements: "
+        "hook must be 1 to 2 sentences and hit immediately with tension, curiosity, and danger. "
+        "narration_text must be exactly 5 to 7 paragraphs, with each paragraph functioning as one short-form chapter and separated by a blank line. "
+        "The full story must stay coherent, logically consistent, and emotionally readable from beginning to end. "
+        "Each chapter should escalate the situation, feel easy to narrate aloud, and ideally close on a reveal, reversal, question, or forward pull that makes people want the next part, but never at the expense of clarity or coherence. "
+        "Preserve the core plot and emotional truth, but sharpen pacing, imagery, and suspense so it feels cinematic and addictive. "
+        "Use clean first-person voice, vivid sensory detail, sharp sentence variety, and constant forward momentum. "
+        "If the source is thin, expand tension and interiority without contradicting the story. "
+        "Avoid repetitive filler and banned phrases such as 'I remember', 'it all started when', 'little did I know', 'if you're hearing this', 'I never thought', and 'to this day'. "
+        "Do not add labels like Chapter 1, bullet points, markdown, or commentary outside the JSON."
     )
     payload = {
         "model": settings.OPENAI_SCRIPT_MODEL,
@@ -191,6 +200,26 @@ def generate_script_payload(story: Story) -> dict[str, str]:
     except Exception:
         pass
     return _heuristic_first_person(source_text, story.title)
+
+
+def _script_part_specs(script: ScriptVersion, target_seconds: int = SHORT_TARGET_SECONDS) -> list[tuple[str, int, int]]:
+    chapters = [
+        segment.strip()
+        for segment in CHAPTER_BREAK_RE.split((script.narration_text or "").strip())
+        if segment.strip()
+    ]
+    if SERIES_MIN_PARTS <= len(chapters) <= SERIES_MAX_PARTS:
+        if script.hook.strip():
+            chapters[0] = f"{script.hook.strip()} {chapters[0]}".strip()
+        if script.outro.strip():
+            chapters[-1] = f"{chapters[-1]} {script.outro.strip()}".strip()
+        return [
+            (body, index, estimate_seconds(body))
+            for index, body in enumerate(chapters, start=1)
+        ]
+
+    composite = " ".join(filter(None, [script.hook, script.narration_text, script.outro])).strip()
+    return split_sentences(composite, target_seconds=target_seconds)
 
 
 def _clip_text(text: str, limit: int) -> str:
@@ -386,7 +415,7 @@ def upsert_script(session: Session, story: Story) -> ScriptVersion:
         narration_text=payload["narration_text"],
         outro=payload["outro"],
         model_name=payload["model_name"],
-        prompt_version="v1",
+        prompt_version="v2",
         is_active=True,
     )
     session.add(script)
@@ -403,7 +432,7 @@ def replace_parts_from_script(session: Session, story: Story, script: ScriptVers
     for part in session.exec(select(StoryPart).where(StoryPart.story_id == story.id)).all():
         session.delete(part)
     composite = " ".join(filter(None, [script.hook, script.narration_text, script.outro])).strip()
-    part_specs = split_sentences(composite, target_seconds=55)
+    part_specs = _script_part_specs(script)
     parts: list[StoryPart] = []
     cursor = 0
     for body, index, est_seconds in part_specs:
