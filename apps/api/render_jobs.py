@@ -9,7 +9,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlmodel import Field, SQLModel, Session, select
 
 from shared.config import settings
-from shared.workflow import JobStatus, ReleaseStatus, StoryStatus, can_transition_job
+from shared.workflow import (
+    JobStatus,
+    PublishApprovalStatus,
+    ReleaseStatus,
+    StoryStatus,
+    can_transition_job,
+)
 
 from .db import get_session
 from .models import (
@@ -25,6 +31,7 @@ from .models import (
     Story,
     StoryPart,
 )
+from .publishing import delivery_mode_for_platform
 from .pipeline import release_for_artifact
 
 router = APIRouter(prefix="/render-jobs", tags=["render-jobs"])
@@ -135,6 +142,34 @@ def _assemble_render_context(job: Job, session: Session) -> dict[str, Any]:
     }
 
 
+def _compilation_dependencies_ready(job: Job, session: Session) -> bool:
+    if job.kind != "render_compilation" or not job.story_id:
+        return True
+    parts = session.exec(
+        select(StoryPart)
+        .where(StoryPart.story_id == job.story_id)
+    ).all()
+    if not parts:
+        return False
+    part_ids = {part.id for part in parts}
+    short_jobs = session.exec(
+        select(Job)
+        .where(
+            Job.story_id == job.story_id,
+            Job.kind == "render_part",
+            Job.story_part_id.is_not(None),
+        )
+    ).all()
+    jobs_by_part = {short_job.story_part_id: short_job for short_job in short_jobs if short_job.story_part_id is not None}
+    if set(jobs_by_part) != part_ids:
+        return False
+    terminal_statuses = {
+        JobStatus.PUBLISH_READY.value,
+        JobStatus.PUBLISHED.value,
+    }
+    return all(short_job.status in terminal_statuses for short_job in jobs_by_part.values())
+
+
 @router.get("/", response_model=list[JobRead])
 def list_render_jobs(
     status: str | None = None,
@@ -146,7 +181,8 @@ def list_render_jobs(
     if status:
         query = query.where(Job.status == status)
     query = query.order_by(Job.id).limit(limit)
-    return session.exec(query).all()
+    jobs = session.exec(query).all()
+    return [job for job in jobs if _compilation_dependencies_ready(job, session)]
 
 
 @router.post("/{job_id}/claim")
@@ -159,6 +195,8 @@ def claim_render_job(
     job = session.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    if not _compilation_dependencies_ready(job, session):
+        raise HTTPException(status_code=409, detail="Compilation dependencies not ready")
     if job.status != JobStatus.QUEUED.value:
         raise HTTPException(status_code=409, detail="Invalid state")
     job.status = JobStatus.CLAIMED.value
@@ -279,6 +317,10 @@ def update_render_job_status(
         ):
             release.render_artifact_id = artifact.id
             release.status = ReleaseStatus.READY.value
+            release.publish_status = ReleaseStatus.READY.value
+            release.approval_status = PublishApprovalStatus.PENDING.value
+            release.delivery_mode = delivery_mode_for_platform(release.platform)
+            release.last_error = None
             session.add(release)
         if job.compilation_id:
             compilation = session.get(Compilation, job.compilation_id)

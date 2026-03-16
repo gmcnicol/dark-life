@@ -32,8 +32,30 @@ class JobStatus(StrEnum):
 class ReleaseStatus(StrEnum):
     DRAFT = "draft"
     READY = "ready"
+    APPROVED = "approved"
+    SCHEDULED = "scheduled"
+    PUBLISHING = "publishing"
+    MANUAL_HANDOFF = "manual_handoff"
     PUBLISHED = "published"
-    FAILED = "failed"
+    ERRORED = "errored"
+
+
+class PublishJobStatus(StrEnum):
+    QUEUED = "queued"
+    CLAIMED = "claimed"
+    PUBLISHING = "publishing"
+    PUBLISHED = "published"
+    ERRORED = "errored"
+
+
+class PublishApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+
+
+class PublishDeliveryMode(StrEnum):
+    AUTOMATED = "automated"
+    MANUAL = "manual"
 
 
 class RenderVariant(StrEnum):
@@ -88,12 +110,33 @@ def can_transition_job(current: str, next_status: str) -> bool:
         return False
 
 
+PUBLISH_JOB_STATUS_TRANSITIONS: dict[PublishJobStatus, set[PublishJobStatus]] = {
+    PublishJobStatus.QUEUED: {PublishJobStatus.CLAIMED, PublishJobStatus.ERRORED},
+    PublishJobStatus.CLAIMED: {PublishJobStatus.PUBLISHING, PublishJobStatus.ERRORED},
+    PublishJobStatus.PUBLISHING: {PublishJobStatus.PUBLISHED, PublishJobStatus.ERRORED},
+    PublishJobStatus.PUBLISHED: set(),
+    PublishJobStatus.ERRORED: {PublishJobStatus.QUEUED},
+}
+
+
+def can_transition_publish_job(current: str, next_status: str) -> bool:
+    """Return True when a publish job state transition is allowed."""
+    try:
+        return PublishJobStatus(next_status) in PUBLISH_JOB_STATUS_TRANSITIONS[PublishJobStatus(current)]
+    except Exception:
+        return False
+
+
 __all__ = [
     "AssetKind",
     "JobStatus",
+    "PublishApprovalStatus",
+    "PublishDeliveryMode",
+    "PublishJobStatus",
     "ReleaseStatus",
     "RenderVariant",
     "StoryStatus",
     "can_transition_job",
+    "can_transition_publish_job",
     "can_transition_story",
 ]

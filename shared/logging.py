@@ -14,17 +14,27 @@ from typing import Any
 from shared.config import settings
 
 
-SERVICE_NAME = "renderer"
+SERVICE_NAME = os.getenv("SERVICE_NAME", "renderer")
 
 # Configure root logger for JSON output. Only the JSON message body is printed.
 _LEVEL = getattr(logging, os.getenv("LOG_LEVEL", settings.LOG_LEVEL).upper(), logging.INFO)
 logging.basicConfig(level=_LEVEL, format="%(message)s")
 
-_SECRET_KEYS = {"API_AUTH_TOKEN", "ELEVENLABS_API_KEY"}
+_SECRET_KEYS = {
+    "API_AUTH_TOKEN",
+    "ELEVENLABS_API_KEY",
+    "INSTAGRAM_ACCESS_TOKEN",
+    "OPENAI_API_KEY",
+}
 
 
 def _current_secrets() -> list[str]:
-    return [settings.API_AUTH_TOKEN, settings.ELEVENLABS_API_KEY]
+    return [
+        settings.API_AUTH_TOKEN,
+        settings.ELEVENLABS_API_KEY,
+        settings.INSTAGRAM_ACCESS_TOKEN,
+        settings.OPENAI_API_KEY,
+    ]
 
 
 def _mask(value: Any) -> Any:
@@ -62,4 +72,3 @@ def log_debug(event: str, **fields: object) -> None:
 
 
 __all__ = ["log_info", "log_error", "log_debug", "SERVICE_NAME"]
-

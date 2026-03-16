@@ -33,8 +33,11 @@ services:
     env_file: ../.env
     environment:
       - PYTHONPATH=/app
+      - SERVICE_NAME=api
     ports:
       - "8000:8000"
+    volumes:
+      - ../output:/output:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,6 +77,7 @@ services:
     environment:
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
+      SERVICE_NAME: renderer
     volumes:
       - ../content:/content
       - ../output:/output
@@ -104,6 +108,7 @@ services:
     environment:
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
+      SERVICE_NAME: scheduler
     volumes:
       - ../content:/content
       - ../output:/output
@@ -113,17 +118,26 @@ services:
     profiles:
       - scheduler
 
-  uploader:
+  publisher:
     build:
       context: ..
-      dockerfile: services/uploader/Dockerfile
+      dockerfile: services/publisher/Dockerfile
     env_file: ../.env
+    environment:
+      SERVICE_NAME: publisher
     volumes:
       - ../output:/output
       - ../secrets:/secrets:ro
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "services.publisher.healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - publisher
 
   reddit_ingestor:
     build:

@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { to: "/inbox", label: "Inbox", kicker: "Story triage" },
   { to: "/board", label: "Pipeline", kicker: "Stage pressure" },
   { to: "/jobs", label: "Renders", kicker: "Worker queue" },
-  { to: "/publish", label: "Publish", kicker: "Manual handoff" },
+  { to: "/publish", label: "Publish", kicker: "Approval + delivery" },
   { to: "/settings", label: "Settings", kicker: "System defaults" },
 ];
 
@@ -53,7 +53,7 @@ function routeMeta(pathname: string) {
       eyebrow: "Release queue",
       title: "Publish handoff",
       description:
-        "Finalize ready releases, attach destination identifiers, and clear the last human checkpoint before distribution.",
+        "Review releases, schedule automated delivery, and close out manual handoffs without dropping into backend scripts.",
     };
   }
   if (pathname.startsWith("/settings")) {

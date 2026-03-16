@@ -1,4 +1,4 @@
-.PHONY: init sync test up down logs api web renderer renderer-logs renderer-run renderer-ffreport renderer-clean uploader ingest rebuild migrate smoke
+.PHONY: init sync test up down logs api web renderer renderer-logs renderer-run renderer-ffreport renderer-clean publisher publisher-logs ingest rebuild migrate smoke
 
 VENV_DIR := .venv
 COMPOSE := docker compose -f infra/docker-compose.yml
@@ -45,8 +45,11 @@ renderer-ffreport:
 renderer-clean:
 	$(COMPOSE) run --rm --no-deps renderer rm -rf /tmp/renderer/* /tmp/ffreport-*.log
 
-uploader:
-	$(COMPOSE) run --rm uploader
+publisher:
+	$(COMPOSE) up -d publisher
+
+publisher-logs:
+	$(COMPOSE) logs -f --tail=0 publisher
 
 ingest:
 	$(COMPOSE) --profile ops run --rm reddit_ingestor incremental

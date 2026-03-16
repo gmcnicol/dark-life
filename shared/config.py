@@ -83,10 +83,18 @@ class Settings(BaseSettings):
         default="http://api:8000",
         description="Base URL for the Dark Life API (used by ingestors)",
     )
+    PUBLIC_BASE_URL: str = Field(
+        default="http://localhost:8000",
+        description="Public base URL used when generating signed artifact links",
+    )
     API_AUTH_TOKEN: str = Field(
         default="",
         description="Bearer token for privileged API access",
         validation_alias=AliasChoices("API_AUTH_TOKEN", "ADMIN_API_TOKEN"),
+    )
+    ARTIFACT_SIGNING_SECRET: str = Field(
+        default="",
+        description="Secret used to sign public artifact URLs",
     )
     POLL_INTERVAL_MS: int = Field(
         default=5000,
@@ -196,6 +204,38 @@ class Settings(BaseSettings):
     SCHEDULER_ENABLE_WEEKLY: bool = Field(
         default=True,
         description="Whether the scheduler should enqueue weekly compilation jobs",
+    )
+    PUBLISH_POLL_INTERVAL_SEC: int = Field(
+        default=15,
+        description="Polling interval for the publisher worker in seconds",
+    )
+    PUBLISH_MAX_CONCURRENT: int = Field(
+        default=1,
+        description="Maximum concurrent publish jobs",
+    )
+    PUBLISH_LEASE_SECONDS: int = Field(
+        default=180,
+        description="Lease duration when claiming publish jobs",
+    )
+    PUBLISH_RETRY_LIMIT: int = Field(
+        default=3,
+        description="Maximum publish retries before leaving a release errored",
+    )
+    INSTAGRAM_GRAPH_API_BASE: str = Field(
+        default="https://graph.facebook.com/v23.0",
+        description="Base URL for the Instagram Graph API",
+    )
+    INSTAGRAM_APP_ID: str = Field(
+        default="",
+        description="Instagram or Meta app identifier",
+    )
+    INSTAGRAM_BUSINESS_ACCOUNT_ID: str = Field(
+        default="",
+        description="Instagram business account identifier",
+    )
+    INSTAGRAM_ACCESS_TOKEN: str = Field(
+        default="",
+        description="Instagram Graph API access token",
     )
 
     # Compatibility attribute; ``ADMIN_API_TOKEN`` is retained as a property

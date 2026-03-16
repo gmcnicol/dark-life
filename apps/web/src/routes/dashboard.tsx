@@ -72,7 +72,7 @@ export default function DashboardRoute() {
         <MetricCard label="Active stories" value={storiesQuery.isLoading ? "…" : activeStories.length} detail="Stories still moving through review, media, render, or publish handoff." />
         <MetricCard label="Script pressure" value={storiesQuery.isLoading ? "…" : (counts.ingested ?? 0) + (counts.scripted ?? 0)} detail="Items still waiting for script approval or narrative cleanup." />
         <MetricCard label="Render pressure" value={storiesQuery.isLoading ? "…" : (counts.queued ?? 0) + (counts.rendering ?? 0)} detail="Stories already committed to render execution or actively processing." />
-        <MetricCard label="Ready to publish" value={releasesQuery.isLoading ? "…" : releaseQueue.length} detail="Final handoff items that only need manual posting metadata." />
+        <MetricCard label="Publish queue" value={releasesQuery.isLoading ? "…" : releaseQueue.length} detail="Releases currently waiting on approval, schedule, delivery, or manual completion." />
       </section>
 
       {(storiesQuery.isLoading || releasesQuery.isLoading) ? (
@@ -140,7 +140,9 @@ export default function DashboardRoute() {
                 <div key={release.id} className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <h3 className="text-base font-semibold text-white">{release.title}</h3>
-                    <StatusBadge tone="success">{release.platform}</StatusBadge>
+                    <StatusBadge tone={release.status === "errored" ? "danger" : release.status === "manual_handoff" ? "warning" : "success"}>
+                      {release.platform}
+                    </StatusBadge>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">{release.description}</p>
                 </div>

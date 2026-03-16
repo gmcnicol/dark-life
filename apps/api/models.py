@@ -8,7 +8,16 @@ from typing import Optional
 from sqlalchemy import Boolean, Column, DateTime, JSON, String, Text, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
-from shared.workflow import AssetKind, JobStatus, ReleaseStatus, RenderVariant, StoryStatus
+from shared.workflow import (
+    AssetKind,
+    JobStatus,
+    PublishApprovalStatus,
+    PublishDeliveryMode,
+    PublishJobStatus,
+    ReleaseStatus,
+    RenderVariant,
+    StoryStatus,
+)
 
 
 def utc_now() -> datetime:
@@ -325,6 +334,15 @@ class ReleaseBase(SQLModel):
     description: str = ""
     hashtags: list[str] | None = Field(default=None, sa_column=Column(JSON))
     status: str = Field(default=ReleaseStatus.DRAFT.value)
+    publish_status: str = Field(default=ReleaseStatus.DRAFT.value)
+    approval_status: str = Field(default=PublishApprovalStatus.PENDING.value)
+    delivery_mode: str = Field(default=PublishDeliveryMode.AUTOMATED.value)
+    platform_video_id: str | None = None
+    publish_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    approved_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    last_error: str | None = Field(default=None, sa_column=Column(Text))
+    attempt_count: int = 0
+    provider_metadata: dict | None = Field(default=None, sa_column=Column(JSON))
 
 
 class Release(ReleaseBase, TimestampedModel, table=True):
@@ -339,6 +357,36 @@ class Release(ReleaseBase, TimestampedModel, table=True):
 class ReleaseRead(ReleaseBase):
     id: int
     published_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    artifact_path: str | None = None
+    signed_asset_url: str | None = None
+    publish_job_id: int | None = None
+
+
+class PublishJobBase(SQLModel):
+    release_id: int = Field(foreign_key="release.id")
+    platform: str
+    status: str = Field(default=PublishJobStatus.QUEUED.value)
+    lease_expires_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    attempts: int = 0
+    not_before: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    correlation_id: str | None = None
+    payload: dict | None = Field(default=None, sa_column=Column(JSON))
+    result: dict | None = Field(default=None, sa_column=Column(JSON))
+    error_class: str | None = None
+    error_message: str | None = Field(default=None, sa_column=Column(Text))
+    stderr_snippet: str | None = None
+
+
+class PublishJob(PublishJobBase, TimestampedModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    __table_args__ = (UniqueConstraint("release_id"),)
+
+
+class PublishJobRead(PublishJobBase):
+    id: int
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -370,6 +418,8 @@ __all__ = [
     "Job",
     "JobRead",
     "JobUpdate",
+    "PublishJob",
+    "PublishJobRead",
     "Release",
     "ReleaseRead",
     "RenderArtifact",

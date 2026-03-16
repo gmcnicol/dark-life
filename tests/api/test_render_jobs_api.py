@@ -148,3 +148,48 @@ def test_render_job_routes_require_auth(client):
     assert res.status_code == 401
     res = client.get(f"/render-jobs/{job_id}/context")
     assert res.status_code == 401
+
+
+def test_compilation_job_hidden_until_part_jobs_ready(client):
+    client, engine = client
+    with Session(engine) as session:
+        story = Story(title="Story", status="queued")
+        session.add(story)
+        session.flush()
+        preset = session.exec(select(RenderPreset)).first()
+        part = StoryPart(
+            story_id=story.id,
+            index=1,
+            body_md="One.",
+            source_text="One.",
+            script_text="One.",
+            est_seconds=2,
+            approved=True,
+        )
+        session.add(part)
+        session.flush()
+        short_job = Job(
+            story_id=story.id,
+            story_part_id=part.id,
+            kind="render_part",
+            status="queued",
+            variant="short",
+            render_preset_id=preset.id if preset else None,
+        )
+        compilation_job = Job(
+            story_id=story.id,
+            compilation_id=1,
+            kind="render_compilation",
+            status="queued",
+            variant="weekly",
+            render_preset_id=preset.id if preset else None,
+        )
+        session.add(short_job)
+        session.add(compilation_job)
+        session.commit()
+        session.refresh(compilation_job)
+
+    res = client.get("/render-jobs", params={"status": "queued"}, headers=_auth_headers())
+    assert res.status_code == 200
+    ids = {job["id"] for job in res.json()}
+    assert compilation_job.id not in ids

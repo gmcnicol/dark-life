@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from shared.config import settings
-from shared.workflow import ReleaseStatus, RenderVariant, StoryStatus, can_transition_story
+from shared.workflow import PublishApprovalStatus, PublishJobStatus, ReleaseStatus, RenderVariant, StoryStatus, can_transition_story
 
 from .db import get_session
 from .models import (
@@ -36,6 +36,16 @@ from .models import (
     StoryPartRead,
     StoryRead,
     StoryUpdate,
+)
+from .publishing import (
+    approval_payload_status,
+    delivery_mode_for_platform,
+    ensure_publish_job,
+    manual_handoff_metadata,
+    maybe_mark_story_published,
+    release_read,
+    resolve_publish_job,
+    validate_release_platform,
 )
 from .pipeline import (
     create_asset_bundle,
@@ -107,6 +117,14 @@ class CompilationCreate(BaseModel):
 
 class PublishUpdate(BaseModel):
     platform_video_id: str | None = None
+    notes: str | None = None
+
+
+class ReleaseApprovalUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    hashtags: list[str] | None = None
+    publish_at: datetime | None = None
 
 
 def _get_story(session: Session, story_id: int) -> Story:
@@ -114,6 +132,15 @@ def _get_story(session: Session, story_id: int) -> Story:
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
     return story
+
+
+def _serialize_releases(session: Session, releases: list[Release]) -> list[ReleaseRead]:
+    return [release_read(session, release) for release in releases]
+
+
+def _sync_release_state(release: Release, status: str) -> None:
+    release.status = status
+    release.publish_status = status
 
 
 def _extract_image_keywords(story: Story) -> str:
@@ -591,12 +618,14 @@ def create_releases(
     story_id: int,
     payload: ReleaseCreate,
     session: Session = Depends(get_session),
-) -> list[Release]:
+) -> list[ReleaseRead]:
     story = _get_story(session, story_id)
     ensure_default_presets(session)
     preset = session.exec(select(RenderPreset).where(RenderPreset.slug == payload.preset_slug)).first()
     if not preset:
         raise HTTPException(status_code=404, detail="Render preset not found")
+    for platform in payload.platforms:
+        validate_release_platform(platform, preset.variant)
     bundle_id = payload.asset_bundle_id or story.active_asset_bundle_id
     if not bundle_id:
         raise HTTPException(status_code=400, detail="Active asset bundle required")
@@ -619,49 +648,149 @@ def create_releases(
         asset_bundle=bundle,
     )
     session.commit()
-    return releases
+    return _serialize_releases(session, releases)
 
 
 @router.get("/stories/{story_id}/releases", response_model=list[ReleaseRead])
-def list_releases(story_id: int, session: Session = Depends(get_session)) -> list[Release]:
+def list_releases(story_id: int, session: Session = Depends(get_session)) -> list[ReleaseRead]:
     _get_story(session, story_id)
-    return session.exec(
+    releases = session.exec(
         select(Release)
         .where(Release.story_id == story_id)
         .order_by(Release.id.desc())
     ).all()
+    return _serialize_releases(session, releases)
 
 
 @router.get("/releases/queue", response_model=list[ReleaseRead])
-def release_queue(session: Session = Depends(get_session)) -> list[Release]:
-    return session.exec(
+def release_queue(session: Session = Depends(get_session)) -> list[ReleaseRead]:
+    releases = session.exec(
         select(Release)
-        .where(Release.status == ReleaseStatus.READY.value)
+        .where(
+            Release.status.in_(
+                [
+                    ReleaseStatus.READY.value,
+                    ReleaseStatus.APPROVED.value,
+                    ReleaseStatus.SCHEDULED.value,
+                    ReleaseStatus.PUBLISHING.value,
+                    ReleaseStatus.MANUAL_HANDOFF.value,
+                    ReleaseStatus.ERRORED.value,
+                ]
+            )
+        )
         .order_by(Release.id.asc())
     ).all()
+    return _serialize_releases(session, releases)
 
 
-@router.post("/releases/{release_id}/publish", response_model=ReleaseRead)
-def publish_release(
+@router.post("/releases/{release_id}/approve", response_model=ReleaseRead)
+def approve_release(
     release_id: int,
-    payload: PublishUpdate,
+    payload: ReleaseApprovalUpdate,
     session: Session = Depends(get_session),
-) -> Release:
+) -> ReleaseRead:
     release = session.get(Release, release_id)
     if not release:
         raise HTTPException(status_code=404, detail="Release not found")
-    release.status = ReleaseStatus.PUBLISHED.value
-    release.published_at = datetime.now(timezone.utc)
-    if payload.platform_video_id:
-        release.description = f"{release.description}\n\nPlatform video id: {payload.platform_video_id}".strip()
+    validate_release_platform(release.platform, release.variant)
+    if not release.render_artifact_id:
+        raise HTTPException(status_code=400, detail="Release is missing a render artifact")
+    if payload.title is not None:
+        release.title = payload.title.strip()
+    if payload.description is not None:
+        release.description = payload.description.strip()
+    if payload.hashtags is not None:
+        release.hashtags = payload.hashtags
+    publish_at = payload.publish_at
+    if publish_at and publish_at.tzinfo is None:
+        publish_at = publish_at.replace(tzinfo=timezone.utc)
+    release.publish_at = publish_at
+    release.approved_at = datetime.now(timezone.utc)
+    release.approval_status = PublishApprovalStatus.APPROVED.value
+    release.delivery_mode = delivery_mode_for_platform(release.platform)
+    _sync_release_state(release, approval_payload_status(publish_at))
+    release.last_error = None
+    ensure_publish_job(
+        session,
+        release,
+        not_before=publish_at,
+        payload={
+            "delivery_mode": release.delivery_mode,
+            "variant": release.variant,
+        },
+    )
     session.add(release)
-    story = session.get(Story, release.story_id)
-    if story:
-        story.status = StoryStatus.PUBLISHED.value
-        session.add(story)
     session.commit()
-    session.refresh(release)
-    return release
+    return release_read(session, release)
+
+
+@router.post("/releases/{release_id}/retry", response_model=ReleaseRead)
+def retry_release(
+    release_id: int,
+    session: Session = Depends(get_session),
+) -> ReleaseRead:
+    release = session.get(Release, release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+    if release.status != ReleaseStatus.ERRORED.value:
+        raise HTTPException(status_code=409, detail="Only errored releases can be retried")
+    next_status = approval_payload_status(release.publish_at)
+    _sync_release_state(release, next_status)
+    release.last_error = None
+    ensure_publish_job(
+        session,
+        release,
+        not_before=release.publish_at,
+        payload={
+            "delivery_mode": release.delivery_mode,
+            "variant": release.variant,
+            "retry": True,
+        },
+    )
+    session.add(release)
+    session.commit()
+    return release_read(session, release)
+
+
+@router.post("/releases/{release_id}/complete-manual-publish", response_model=ReleaseRead)
+def complete_manual_publish(
+    release_id: int,
+    payload: PublishUpdate,
+    session: Session = Depends(get_session),
+) -> ReleaseRead:
+    release = session.get(Release, release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+    if release.delivery_mode != "manual":
+        raise HTTPException(status_code=409, detail="Release is not a manual handoff")
+    if release.status != ReleaseStatus.MANUAL_HANDOFF.value:
+        raise HTTPException(status_code=409, detail="Release is not ready for manual completion")
+    if not payload.platform_video_id:
+        raise HTTPException(status_code=400, detail="platform_video_id is required")
+    release.platform_video_id = payload.platform_video_id
+    release.published_at = datetime.now(timezone.utc)
+    release.provider_metadata = {
+        **(release.provider_metadata or {}),
+        **({"manual_notes": payload.notes} if payload.notes else {}),
+        "manual_handoff": manual_handoff_metadata(
+            release,
+            release_read(session, release).signed_asset_url or "",
+        ),
+    }
+    _sync_release_state(release, ReleaseStatus.PUBLISHED.value)
+    publish_job = resolve_publish_job(session, release.id or 0)
+    if publish_job:
+        publish_job.status = PublishJobStatus.PUBLISHED.value
+        publish_job.result = {
+            **(publish_job.result or {}),
+            "manual_completion": True,
+            "platform_video_id": payload.platform_video_id,
+        }
+        session.add(publish_job)
+    session.add(release)
+    maybe_mark_story_published(session, release.story_id)
+    session.commit()
+    return release_read(session, release)
 
 
 @router.post("/stories/{story_id}/compilations", response_model=CompilationRead)
@@ -675,6 +804,8 @@ def create_compilation(
     preset = session.exec(select(RenderPreset).where(RenderPreset.slug == payload.preset_slug)).first()
     if not preset:
         raise HTTPException(status_code=404, detail="Render preset not found")
+    for platform in payload.platforms:
+        validate_release_platform(platform, RenderVariant.WEEKLY.value)
     compilation, _job = create_weekly_compilation(session, story, preset=preset)
     release = Release(
         story_id=story.id,
@@ -685,6 +816,9 @@ def create_compilation(
         description=f"Weekly full story cut for {story.title}",
         hashtags=["weekly", "scarystories", "youtube"],
         status=ReleaseStatus.DRAFT.value,
+        publish_status=ReleaseStatus.DRAFT.value,
+        approval_status=PublishApprovalStatus.PENDING.value,
+        delivery_mode=delivery_mode_for_platform(payload.platforms[0] if payload.platforms else "youtube"),
     )
     session.add(release)
     story.status = StoryStatus.QUEUED.value
@@ -738,7 +872,7 @@ def story_overview(story_id: int, session: Session = Depends(get_session)) -> di
         "active_script": ScriptVersionRead.model_validate(script).model_dump() if script else None,
         "parts": [StoryPartRead.model_validate(part).model_dump() for part in parts],
         "asset_bundles": [AssetBundleRead.model_validate(bundle).model_dump() for bundle in bundles],
-        "releases": [ReleaseRead.model_validate(release).model_dump() for release in releases],
+        "releases": [release_read(session, release).model_dump() for release in releases],
         "artifacts": [
             RenderArtifactRead.model_validate(artifact).model_dump()
             for artifact in session.exec(

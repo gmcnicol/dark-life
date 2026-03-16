@@ -26,7 +26,16 @@ export const JOB_STATUSES = [
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-export const RELEASE_STATUSES = ["draft", "ready", "published", "failed"] as const;
+export const RELEASE_STATUSES = [
+  "draft",
+  "ready",
+  "approved",
+  "scheduled",
+  "publishing",
+  "manual_handoff",
+  "published",
+  "errored",
+] as const;
 export type ReleaseStatus = (typeof RELEASE_STATUSES)[number];
 
 export const RENDER_VARIANTS = ["short", "weekly"] as const;

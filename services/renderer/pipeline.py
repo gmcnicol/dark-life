@@ -118,13 +118,24 @@ def render_compilation_job(context: dict[str, Any]) -> dict[str, object]:
     compilation = context["compilation"]
     if not compilation:
         raise FileNotFoundError("Compilation not found")
-    artifacts = [
-        Path(artifact["video_path"])
+    part_index_by_id = {
+        part["id"]: part["index"]
+        for part in context.get("parts", [])
+        if part.get("id") is not None
+    }
+    artifact_rows = [
+        artifact
         for artifact in context.get("artifacts", [])
-        if artifact.get("variant") == "short" and artifact.get("video_path")
+        if artifact.get("variant") == "short"
+        and artifact.get("story_part_id") in part_index_by_id
+        and artifact.get("video_path")
     ]
-    if not artifacts:
+    if not artifact_rows:
         raise FileNotFoundError("Weekly compilation requires rendered short artifacts")
+    artifact_rows.sort(key=lambda artifact: part_index_by_id[artifact["story_part_id"]])
+    if len(artifact_rows) != len(part_index_by_id):
+        raise FileNotFoundError("Weekly compilation requires all short parts to be rendered")
+    artifacts = [Path(artifact["video_path"]) for artifact in artifact_rows]
     output_root = Path(settings.OUTPUT_DIR) / "stories" / str(story["id"]) / "jobs" / str(job["id"])
     output_root.mkdir(parents=True, exist_ok=True)
     video_path = output_root / "video.mp4"

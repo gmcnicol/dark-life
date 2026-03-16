@@ -14,14 +14,14 @@ export default function PublishRoute() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Release handoff"
+        eyebrow="Publishing ops"
         title="Publish queue"
-        description="This is the last human checkpoint. Each item here has already cleared render and only needs platform metadata plus a manual publish confirmation."
+        description="Review rendered releases, approve or schedule automated delivery, and finish manual handoffs without leaving the operator surface."
       />
       <section className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Ready releases" value={releasesQuery.isLoading ? "…" : releases.length} detail="Items currently waiting on manual publish." />
-        <MetricCard label="Primary platform" value={releasesQuery.isLoading ? "…" : releases.filter((item) => item.platform === "youtube").length} detail="YouTube-ready releases in the queue." />
-        <MetricCard label="Short-form items" value={releasesQuery.isLoading ? "…" : releases.filter((item) => item.variant === "short").length} detail="Short releases staged for platform-specific posting." />
+        <MetricCard label="Queue depth" value={releasesQuery.isLoading ? "…" : releases.length} detail="Releases currently active in review, schedule, publish, or manual handoff lanes." />
+        <MetricCard label="Awaiting review" value={releasesQuery.isLoading ? "…" : releases.filter((item) => item.status === "ready").length} detail="Items waiting on approval or a schedule." />
+        <MetricCard label="Manual handoff" value={releasesQuery.isLoading ? "…" : releases.filter((item) => item.status === "manual_handoff").length} detail="Supervised posts that still need a destination id." />
       </section>
       {releasesQuery.isLoading ? <LoadingState label="Loading release queue…" className="min-h-56" /> : <PublishQueue releases={releases} />}
     </div>

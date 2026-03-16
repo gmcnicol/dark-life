@@ -89,6 +89,19 @@ export interface Release {
   description: string;
   hashtags?: string[] | null;
   status: ReleaseStatus;
+  publish_status: ReleaseStatus;
+  approval_status: "pending" | "approved";
+  delivery_mode: "automated" | "manual";
+  platform_video_id?: string | null;
+  publish_at?: string | null;
+  approved_at?: string | null;
+  published_at?: string | null;
+  last_error?: string | null;
+  attempt_count: number;
+  provider_metadata?: Record<string, unknown> | null;
+  artifact_path?: string | null;
+  signed_asset_url?: string | null;
+  publish_job_id?: number | null;
 }
 
 export interface Compilation {
@@ -259,13 +272,35 @@ export async function listReleaseQueue(): Promise<Release[]> {
   return apiFetch<Release[]>("/releases/queue");
 }
 
-export async function publishRelease(
+export async function approveRelease(
   releaseId: number,
-  platformVideoId?: string,
+  payload: {
+    title?: string;
+    description?: string;
+    hashtags?: string[];
+    publish_at?: string | null;
+  },
 ): Promise<Release> {
-  return apiFetch<Release>(`/releases/${releaseId}/publish`, {
+  return apiFetch<Release>(`/releases/${releaseId}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ platform_video_id: platformVideoId }),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function retryRelease(releaseId: number): Promise<Release> {
+  return apiFetch<Release>(`/releases/${releaseId}/retry`, {
+    method: "POST",
+  });
+}
+
+export async function completeManualPublish(
+  releaseId: number,
+  payload: { platform_video_id: string; notes?: string },
+): Promise<Release> {
+  return apiFetch<Release>(`/releases/${releaseId}/complete-manual-publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 }

@@ -113,6 +113,17 @@ def test_create_weekly_compilation(client):
     assert any(job["kind"] == "render_compilation" for job in jobs)
 
 
+def test_weekly_compilation_rejects_non_youtube_platform(client):
+    client, _engine = client
+    story = client.post("/stories", json={"title": "Weekly", "body_md": "I ran. I hid. I survived."}).json()
+    client.post(f"/stories/{story['id']}/script")
+    res = client.post(
+        f"/stories/{story['id']}/compilations",
+        json={"preset_slug": "weekly-full", "platforms": ["instagram"]},
+    )
+    assert res.status_code == 400
+
+
 def test_bundle_rejects_incomplete_part_asset_map(client, monkeypatch: pytest.MonkeyPatch):
     client, _engine = client
     monkeypatch.setattr(
