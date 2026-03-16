@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -13,7 +14,7 @@ import requests
 from sqlmodel import Session, select
 
 from shared.config import settings
-from shared.workflow import JobStatus, ReleaseStatus, RenderVariant, StoryStatus
+from shared.workflow import JobStatus, PublishApprovalStatus, ReleaseStatus, RenderVariant, StoryStatus
 
 from .models import (
     Asset,
@@ -26,11 +27,33 @@ from .models import (
     Story,
     StoryPart,
 )
+from .publishing import delivery_mode_for_platform, short_release_schedule
 
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 WORDS_PER_SECOND = 2.6
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".webm"}
+STOPWORDS = {
+    "a",
+    "about",
+    "after",
+    "and",
+    "been",
+    "before",
+    "from",
+    "have",
+    "into",
+    "just",
+    "like",
+    "over",
+    "that",
+    "their",
+    "there",
+    "they",
+    "this",
+    "with",
+    "would",
+}
 
 
 def estimate_seconds(text: str) -> int:
@@ -168,6 +191,184 @@ def generate_script_payload(story: Story) -> dict[str, str]:
     except Exception:
         pass
     return _heuristic_first_person(source_text, story.title)
+
+
+def _clip_text(text: str, limit: int) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    clipped = cleaned[: limit - 1].rsplit(" ", 1)[0].strip()
+    return f"{clipped}…"
+
+
+def _first_sentence(text: str) -> str:
+    sentences = [segment.strip() for segment in SENTENCE_RE.split(text.strip()) if segment.strip()]
+    return sentences[0] if sentences else text.strip()
+
+
+def _keyword_candidates(*parts: str) -> list[str]:
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        for token in re.findall(r"[a-zA-Z]{4,}", part.lower()):
+            if token in STOPWORDS or token in seen:
+                continue
+            seen.add(token)
+            keywords.append(token)
+    return keywords
+
+
+def _source_credit(story: Story) -> str | None:
+    author = (story.author or "").strip()
+    subreddit = (story.subreddit or "").strip()
+    source_url = (story.source_url or "").strip()
+    credit_bits: list[str] = []
+    if author:
+        credit_bits.append(f"u/{author}")
+    if subreddit:
+        credit_bits.append(f"r/{subreddit}")
+    if credit_bits and source_url:
+        return f"Original post: {' in '.join(credit_bits)}\n{source_url}"
+    if credit_bits:
+        return f"Original post: {' in '.join(credit_bits)}"
+    if source_url:
+        return f"Original post:\n{source_url}"
+    return None
+
+
+def _heuristic_release_metadata(
+    story: Story,
+    *,
+    part: StoryPart | None,
+    variant: str,
+) -> dict[str, object]:
+    base_title = story.title.strip()
+    if variant == RenderVariant.WEEKLY.value:
+        title = _clip_text(f"{base_title} | Full Story", 90)
+        excerpt_source = story.body_md or base_title
+        base_tags = ["darklifestories", "scarystories", "horrorstories", "fullstory"]
+    else:
+        part_index = part.index if part else 1
+        title = _clip_text(f"{base_title} | Part {part_index}", 90)
+        excerpt_source = (part.script_text or part.body_md) if part else (story.body_md or base_title)
+        base_tags = ["darklifestories", "scarystories", "horrorstories", "shorts"]
+    excerpt = _clip_text(_first_sentence(excerpt_source or base_title), 140)
+    keywords = _keyword_candidates(story.title, story.body_md or "", excerpt_source or "")[:2]
+    hashtags = list(dict.fromkeys([*base_tags, *keywords]))[:6]
+    description_parts = [title, excerpt]
+    credit = _source_credit(story)
+    if credit:
+        description_parts.append(credit)
+    description_parts.append(" ".join(f"#{tag}" for tag in hashtags))
+    description = "\n\n".join(description_parts)
+    return {
+        "title": title,
+        "description": description.strip(),
+        "hashtags": hashtags,
+    }
+
+
+def generate_release_metadata(
+    story: Story,
+    *,
+    part: StoryPart | None = None,
+    variant: str = RenderVariant.SHORT.value,
+) -> dict[str, object]:
+    fallback = _heuristic_release_metadata(story, part=part, variant=variant)
+    if not settings.OPENAI_API_KEY:
+        return fallback
+
+    context = {
+        "channel": "Dark Life Stories",
+        "story_title": story.title,
+        "story_author": story.author,
+        "story_subreddit": story.subreddit,
+        "story_source_url": story.source_url,
+        "variant": variant,
+        "story_excerpt": _clip_text(story.body_md or story.title, 500),
+        "part_index": part.index if part else None,
+        "part_excerpt": _clip_text((part.script_text or part.body_md) if part else "", 350),
+        "fallback": fallback,
+    }
+    payload = {
+        "model": settings.OPENAI_SCRIPT_MODEL,
+        "input": [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Generate publish metadata for a premium horror storytelling channel named Dark Life Stories. "
+                            "Return strict JSON with keys title, description, hashtags. "
+                            "Title must be under 90 characters, sharp and clickable but not spammy. "
+                            "Description should be concise, include a clear original-post credit when author, subreddit, or source_url are provided, and end with hashtags. "
+                            "Hashtags must be lowercase strings without '#', 4 to 6 items."
+                        ),
+                    }
+                ],
+            },
+            {"role": "user", "content": [{"type": "text", "text": json.dumps(context)}]},
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "release_metadata",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "description": {"type": "string"},
+                        "hashtags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 4,
+                            "maxItems": 6,
+                        },
+                    },
+                    "required": ["title", "description", "hashtags"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+    }
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=25,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = data.get("output_text")
+        if not isinstance(text, str):
+            return fallback
+        parsed = json.loads(text)
+        title = _clip_text(str(parsed.get("title") or fallback["title"]), 90)
+        hashtags = [
+            re.sub(r"[^a-z0-9]", "", str(tag).lower().lstrip("#"))
+            for tag in parsed.get("hashtags", [])
+        ]
+        hashtags = [tag for tag in hashtags if tag]
+        if len(hashtags) < 4:
+            hashtags = list(dict.fromkeys([*hashtags, *fallback["hashtags"]]))[:6]
+        description = str(parsed.get("description") or fallback["description"]).strip()
+        credit = _source_credit(story)
+        if credit and credit.lower() not in description.lower():
+            description = f"{description}\n\n{credit}"
+        if "#" not in description:
+            description = f"{description}\n\n" + " ".join(f"#{tag}" for tag in hashtags)
+        return {
+            "title": title,
+            "description": description.strip(),
+            "hashtags": hashtags[:6],
+        }
+    except Exception:
+        return fallback
 
 
 def upsert_script(session: Session, story: Story) -> ScriptVersion:
@@ -408,19 +609,32 @@ def create_short_releases(
         .where(StoryPart.story_id == story.id)
         .order_by(StoryPart.index)
     ).all()
+    publish_slots = short_release_schedule(session, count=len(parts))
+    approved_at = datetime.now(timezone.utc)
     releases: list[Release] = []
     jobs: list[Job] = []
-    for part in parts:
+    for index, part in enumerate(parts):
+        metadata = generate_release_metadata(
+            story,
+            part=part,
+            variant=RenderVariant.SHORT.value,
+        )
+        publish_at = publish_slots[index] if index < len(publish_slots) else None
         for platform in platforms:
             release = Release(
                 story_id=story.id,
                 story_part_id=part.id,
                 platform=platform,
                 variant=RenderVariant.SHORT.value,
-                title=f"{story.title} Part {part.index}",
-                description=f"{story.title}\n\n#scarystories #nosleep #{platform}",
-                hashtags=["scarystories", "nosleep", platform],
+                title=str(metadata["title"]),
+                description=str(metadata["description"]),
+                hashtags=list(metadata["hashtags"]),
                 status=ReleaseStatus.DRAFT.value,
+                publish_status=ReleaseStatus.DRAFT.value,
+                approval_status=PublishApprovalStatus.APPROVED.value,
+                delivery_mode=delivery_mode_for_platform(platform),
+                publish_at=publish_at,
+                approved_at=approved_at,
             )
             session.add(release)
             releases.append(release)

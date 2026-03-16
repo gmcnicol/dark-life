@@ -221,6 +221,30 @@ class Settings(BaseSettings):
         default=3,
         description="Maximum publish retries before leaving a release errored",
     )
+    ACTIVE_PUBLISH_PLATFORMS: str = Field(
+        default="youtube",
+        description="Comma-separated list of active publish platforms",
+    )
+    SHORTS_PUBLISH_HOUR_UTC: int = Field(
+        default=12,
+        description="UTC hour for scheduled short-form publishes",
+    )
+    SHORTS_PUBLISH_MINUTE_UTC: int = Field(
+        default=0,
+        description="UTC minute for scheduled short-form publishes",
+    )
+    WEEKLY_COMPILATION_DAY_UTC: int = Field(
+        default=4,
+        description="UTC weekday for weekly compilation publish scheduling, where Monday is 0",
+    )
+    WEEKLY_COMPILATION_HOUR_UTC: int = Field(
+        default=12,
+        description="UTC hour for scheduled weekly compilation publishes",
+    )
+    WEEKLY_COMPILATION_MINUTE_UTC: int = Field(
+        default=0,
+        description="UTC minute for scheduled weekly compilation publishes",
+    )
     INSTAGRAM_GRAPH_API_BASE: str = Field(
         default="https://graph.facebook.com/v23.0",
         description="Base URL for the Instagram Graph API",

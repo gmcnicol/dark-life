@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 from pathlib import Path
@@ -25,6 +25,15 @@ WEEKLY_PLATFORMS = {"youtube"}
 SIGNED_URL_TTL_SECONDS = 15 * 60
 
 
+def active_publish_platforms() -> list[str]:
+    platforms = [
+        platform.strip().lower()
+        for platform in (settings.ACTIVE_PUBLISH_PLATFORMS or "").split(",")
+        if platform.strip()
+    ]
+    return list(dict.fromkeys(platforms)) or ["youtube"]
+
+
 def delivery_mode_for_platform(platform: str) -> str:
     return (
         PublishDeliveryMode.MANUAL.value
@@ -39,6 +48,11 @@ def validate_release_platform(platform: str, variant: str) -> None:
         raise HTTPException(
             status_code=400,
             detail=f"Platform '{platform}' is not supported for variant '{variant}'",
+        )
+    if platform not in active_publish_platforms():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Platform '{platform}' is not active for publishing",
         )
 
 
@@ -177,6 +191,86 @@ def approval_payload_status(publish_at: datetime | None) -> str:
     if publish_at and publish_at > now:
         return ReleaseStatus.SCHEDULED.value
     return ReleaseStatus.APPROVED.value
+
+
+def next_daily_publish_slot(after: datetime | None = None) -> datetime:
+    base = (after or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    slot = base.replace(
+        hour=settings.SHORTS_PUBLISH_HOUR_UTC,
+        minute=settings.SHORTS_PUBLISH_MINUTE_UTC,
+        second=0,
+        microsecond=0,
+    )
+    if slot <= base:
+        slot += timedelta(days=1)
+    return slot
+
+
+def next_weekday_publish_slot(
+    *,
+    after: datetime | None = None,
+    weekday: int | None = None,
+    hour: int | None = None,
+    minute: int | None = None,
+) -> datetime:
+    base = (after or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    target_weekday = settings.WEEKLY_COMPILATION_DAY_UTC if weekday is None else weekday
+    target_hour = settings.WEEKLY_COMPILATION_HOUR_UTC if hour is None else hour
+    target_minute = settings.WEEKLY_COMPILATION_MINUTE_UTC if minute is None else minute
+    days_ahead = (target_weekday - base.weekday()) % 7
+    slot = base.replace(
+        hour=target_hour,
+        minute=target_minute,
+        second=0,
+        microsecond=0,
+    ) + timedelta(days=days_ahead)
+    if slot <= base:
+        slot += timedelta(days=7)
+    return slot
+
+
+def _latest_release_time(
+    session: Session,
+    *,
+    variant: str,
+    platforms: list[str],
+) -> datetime | None:
+    releases = session.exec(
+        select(Release)
+        .where(
+            Release.variant == variant,
+            Release.platform.in_(platforms),
+            Release.publish_at.is_not(None),
+        )
+        .order_by(Release.publish_at.desc())
+    ).all()
+    for release in releases:
+        if release.publish_at:
+            return release.publish_at.astimezone(timezone.utc)
+    return None
+
+
+def short_release_schedule(session: Session, *, count: int, now: datetime | None = None) -> list[datetime]:
+    if count <= 0:
+        return []
+    platforms = active_publish_platforms()
+    anchor = _latest_release_time(session, variant=RenderVariant.SHORT.value, platforms=platforms)
+    base = max([candidate for candidate in [anchor, now, datetime.now(timezone.utc)] if candidate is not None])
+    first_slot = next_daily_publish_slot(base)
+    return [first_slot + timedelta(days=index) for index in range(count)]
+
+
+def weekly_compilation_schedule(
+    session: Session,
+    *,
+    after: datetime | None = None,
+    now: datetime | None = None,
+) -> datetime:
+    platforms = active_publish_platforms()
+    latest_weekly = _latest_release_time(session, variant=RenderVariant.WEEKLY.value, platforms=platforms)
+    candidates = [candidate for candidate in [after, latest_weekly, now, datetime.now(timezone.utc)] if candidate is not None]
+    base = max(candidates)
+    return next_weekday_publish_slot(after=base)
 
 
 def manual_handoff_metadata(release: Release, signed_asset_url: str) -> dict[str, Any]:

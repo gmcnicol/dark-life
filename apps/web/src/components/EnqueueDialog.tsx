@@ -21,23 +21,12 @@ export default function EnqueueDialog({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [platforms, setPlatforms] = useState<string[]>(["youtube", "tiktok", "instagram"]);
+  const [platforms] = useState<string[]>(["youtube"]);
   const [presetSlug, setPresetSlug] = useState("short-form");
   const [bundleId, setBundleId] = useState<number | null>(bundles[0]?.id ?? null);
   const [includeWeekly, setIncludeWeekly] = useState(true);
   const [isPending, startTransition] = useTransition();
   const canQueue = canQueueRenders(story.status);
-
-  const togglePlatform = (platform: string) => {
-    if (!canQueue) {
-      return;
-    }
-    setPlatforms((current) =>
-      current.includes(platform)
-        ? current.filter((value) => value !== platform)
-        : [...current, platform],
-    );
-  };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -65,7 +54,7 @@ export default function EnqueueDialog({
           <SectionHeading
             eyebrow="Render handoff"
             title="Queue renders"
-            description="Lock the render preset, attach the chosen asset bundle, and pick the delivery platforms before the story enters the worker queue."
+            description="Lock the render preset, attach the chosen asset bundle, and let the system queue, schedule, and publish against the active cadence automatically."
           />
           <div className="space-y-2 text-right">
             <span data-testid="status" className="inline-flex rounded-full border border-white/10 px-3 py-1.5 text-sm font-semibold text-white">
@@ -119,28 +108,23 @@ export default function EnqueueDialog({
 
         <div className="space-y-3">
           <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
-            Platforms
+            Active platform
           </p>
           <div className="flex flex-wrap gap-3">
-            {["youtube", "tiktok", "instagram"].map((platform) => {
-              const active = platforms.includes(platform);
-              return (
-                <button
-                  key={platform}
-                  type="button"
-                  onClick={() => togglePlatform(platform)}
-                  disabled={!canQueue}
-                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                    active
-                      ? "border-cyan-300/35 bg-cyan-300/[0.12] text-cyan-50"
-                      : "border-white/10 text-[var(--text-soft)]"
-                  }`}
-                >
-                  {platform}
-                </button>
-              );
-            })}
+            <span className="rounded-full border border-cyan-300/35 bg-cyan-300/[0.12] px-4 py-2 text-sm font-semibold text-cyan-50">
+              YouTube
+            </span>
+            <span className="rounded-full border border-white/10 px-4 py-2 text-sm text-[var(--text-soft)]">
+              Instagram disabled
+            </span>
           </div>
+          <p className="text-sm text-[var(--text-soft)]">
+            Shorts are scheduled daily at 12:00 UTC. The full-story YouTube compilation is scheduled for Friday at 12:00 UTC after the short run.
+          </p>
+        </div>
+
+        <div className="rounded-[1.3rem] border border-white/8 bg-white/[0.03] px-4 py-4 text-sm text-[var(--text-soft)]">
+          This handoff is fire-and-forget. Releases are pre-approved, assigned publish slots, and the publisher wakes up when each slot arrives.
         </div>
 
         <label className="flex items-center gap-3 rounded-[1.3rem] border border-white/8 bg-white/[0.03] px-4 py-4 text-sm text-white">
@@ -156,7 +140,7 @@ export default function EnqueueDialog({
 
         <div className="flex flex-wrap items-center gap-3">
           <ActionButton type="submit" disabled={isPending || !bundleId || !canQueue}>
-            {isPending ? "Queueing…" : "Queue renders"}
+            {isPending ? "Queueing…" : "Queue and schedule"}
           </ActionButton>
           {!canQueue ? (
             <p className="text-sm text-[var(--text-soft)]">

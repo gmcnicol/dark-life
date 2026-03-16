@@ -82,7 +82,7 @@ def _create_ready_release(session: Session, output_dir: Path, *, platform: str =
     return release
 
 
-def test_approve_release_creates_immediate_and_scheduled_publish_jobs(client):
+def test_approve_release_creates_immediate_and_scheduled_publish_jobs(client, monkeypatch: pytest.MonkeyPatch):
     client, engine, output_dir = client
     with Session(engine) as session:
         release = _create_ready_release(session, output_dir)
@@ -105,6 +105,7 @@ def test_approve_release_creates_immediate_and_scheduled_publish_jobs(client):
     scheduled_release = None
     with Session(engine) as session:
         scheduled_release = _create_ready_release(session, output_dir, platform="instagram")
+    monkeypatch.setattr(publish_jobs_api.settings, "ACTIVE_PUBLISH_PLATFORMS", "youtube,instagram")
     res = client.post(
         f"/releases/{scheduled_release.id}/approve",
         json={"publish_at": "2030-01-01T10:00:00Z"},

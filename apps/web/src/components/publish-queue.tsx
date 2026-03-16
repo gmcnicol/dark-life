@@ -103,7 +103,7 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
   if (releases.length === 0) {
     return (
       <EmptyState
-        title="No releases waiting on publish ops"
+        title="No releases in this publish view"
         description="Rendered assets will land here once the renderer marks them ready for review, scheduling, or manual platform handoff."
       />
     );
@@ -237,8 +237,11 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
                         />
                       </label>
                       <div className="flex items-end">
-                        <ActionButton onClick={() => approve(release, false)} disabled={isPending || release.status === "publishing"}>
-                          Approve now
+                        <ActionButton
+                          onClick={() => approve(release, false)}
+                          disabled={isPending || release.status === "publishing"}
+                        >
+                          Upload now
                         </ActionButton>
                       </div>
                       <div className="flex items-end">

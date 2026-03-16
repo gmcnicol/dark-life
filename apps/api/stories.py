@@ -38,6 +38,7 @@ from .models import (
     StoryUpdate,
 )
 from .publishing import (
+    active_publish_platforms,
     approval_payload_status,
     delivery_mode_for_platform,
     ensure_publish_job,
@@ -45,6 +46,7 @@ from .publishing import (
     maybe_mark_story_published,
     release_read,
     resolve_publish_job,
+    weekly_compilation_schedule,
     validate_release_platform,
 )
 from .pipeline import (
@@ -52,6 +54,7 @@ from .pipeline import (
     create_short_releases,
     create_weekly_compilation,
     ensure_default_presets,
+    generate_release_metadata,
     upsert_script,
 )
 
@@ -64,27 +67,42 @@ CHARS_PER_SECOND = WORDS_PER_SECOND * CHARS_PER_WORD
 MIN_PART_SECONDS = 30
 MAX_PART_SECONDS = 75
 SENTENCE_RE = re.compile(r"[^.!?]+[.!?](?:\s+|$)")
-REMOTE_IMAGE_KEYWORDS = (
-    "shadow",
-    "hallway",
-    "forest",
-    "basement",
-    "attic",
-    "fog",
-    "night",
-    "road",
-    "window",
-    "cabin",
-    "lake",
-    "storm",
-    "door",
-    "apartment",
-    "corridor",
-    "graveyard",
-    "empty",
-    "abandoned",
-    "woods",
-    "house",
+IMAGE_SEARCH_BASE_TERMS = (
+    "eerie",
+    "dark",
+    "moody",
+)
+IMAGE_SEARCH_THEME_CUES = (
+    {
+        "name": "isolation",
+        "triggers": ("alone", "lonely", "empty", "isolated", "missing", "silent", "quiet", "vacant", "remote", "stranded"),
+        "terms": ("lonely", "mist", "silhouette"),
+    },
+    {
+        "name": "decay",
+        "triggers": ("abandoned", "rotting", "derelict", "ruin", "decay", "forgotten", "vacant", "neglected"),
+        "terms": ("abandoned", "derelict", "shadows"),
+    },
+    {
+        "name": "confinement",
+        "triggers": ("hallway", "corridor", "basement", "attic", "door", "window", "apartment", "house", "room", "stair"),
+        "terms": ("shadowy", "hallway", "doorway"),
+    },
+    {
+        "name": "wilderness",
+        "triggers": ("forest", "woods", "wood", "cabin", "lake", "road", "trail", "field", "swamp", "fog"),
+        "terms": ("forest", "mist", "silhouette"),
+    },
+    {
+        "name": "night",
+        "triggers": ("night", "midnight", "moon", "storm", "rain", "fog", "dark"),
+        "terms": ("night", "fog", "moonlit"),
+    },
+    {
+        "name": "presence",
+        "triggers": ("shadow", "watching", "watched", "stare", "whisper", "breath", "footstep", "knock", "scratch", "voice"),
+        "terms": ("ominous", "shadows", "silhouette"),
+    },
 )
 
 
@@ -105,7 +123,7 @@ class AssetBundleCreate(BaseModel):
 
 
 class ReleaseCreate(BaseModel):
-    platforms: list[str] = ["youtube", "tiktok", "instagram"]
+    platforms: list[str] = ["youtube"]
     preset_slug: str = "short-form"
     asset_bundle_id: int | None = None
 
@@ -145,14 +163,21 @@ def _sync_release_state(release: Release, status: str) -> None:
 
 def _extract_image_keywords(story: Story) -> str:
     text = f"{story.title} {story.body_md or ''}".lower()
-    matched = [keyword for keyword in REMOTE_IMAGE_KEYWORDS if keyword in text]
-    title_words = [
-        token
-        for token in re.findall(r"[a-zA-Z]{4,}", story.title.lower())
-        if token not in matched
-    ]
-    keywords = list(dict.fromkeys([*matched, *title_words[:4]]))
-    return " ".join(keywords[:6]) or story.title
+    scored_cues: list[tuple[int, int, tuple[str, ...]]] = []
+
+    for index, cue in enumerate(IMAGE_SEARCH_THEME_CUES):
+        score = sum(1 for trigger in cue["triggers"] if trigger in text)
+        if score:
+            scored_cues.append((score, index, cue["terms"]))
+
+    keywords = list(IMAGE_SEARCH_BASE_TERMS)
+    if scored_cues:
+        for _score, _index, terms in sorted(scored_cues, key=lambda item: (-item[0], item[1]))[:2]:
+            keywords.extend(terms)
+    else:
+        keywords.extend(("shadows", "mist", "silhouette"))
+
+    return " ".join(list(dict.fromkeys(keywords))[:7])
 
 
 def _list_existing_story_images(session: Session, story_id: int) -> list[Asset]:
@@ -624,7 +649,8 @@ def create_releases(
     preset = session.exec(select(RenderPreset).where(RenderPreset.slug == payload.preset_slug)).first()
     if not preset:
         raise HTTPException(status_code=404, detail="Render preset not found")
-    for platform in payload.platforms:
+    platforms = payload.platforms or active_publish_platforms()
+    for platform in platforms:
         validate_release_platform(platform, preset.variant)
     bundle_id = payload.asset_bundle_id or story.active_asset_bundle_id
     if not bundle_id:
@@ -643,7 +669,7 @@ def create_releases(
     releases, _jobs = create_short_releases(
         session,
         story,
-        platforms=payload.platforms,
+        platforms=platforms,
         preset=preset,
         asset_bundle=bundle,
     )
@@ -807,18 +833,37 @@ def create_compilation(
     for platform in payload.platforms:
         validate_release_platform(platform, RenderVariant.WEEKLY.value)
     compilation, _job = create_weekly_compilation(session, story, preset=preset)
+    story_short_releases = session.exec(
+        select(Release)
+        .where(
+            Release.story_id == story.id,
+            Release.variant == RenderVariant.SHORT.value,
+            Release.publish_at.is_not(None),
+        )
+        .order_by(Release.publish_at.desc())
+    ).all()
+    story_schedule_end = next(
+        (release.publish_at for release in story_short_releases if release.publish_at),
+        None,
+    )
+    metadata = generate_release_metadata(
+        story,
+        variant=RenderVariant.WEEKLY.value,
+    )
     release = Release(
         story_id=story.id,
         compilation_id=compilation.id,
         platform=payload.platforms[0] if payload.platforms else "youtube",
         variant=RenderVariant.WEEKLY.value,
-        title=compilation.title,
-        description=f"Weekly full story cut for {story.title}",
-        hashtags=["weekly", "scarystories", "youtube"],
+        title=str(metadata["title"]),
+        description=str(metadata["description"]),
+        hashtags=list(metadata["hashtags"]),
         status=ReleaseStatus.DRAFT.value,
         publish_status=ReleaseStatus.DRAFT.value,
-        approval_status=PublishApprovalStatus.PENDING.value,
+        approval_status=PublishApprovalStatus.APPROVED.value,
         delivery_mode=delivery_mode_for_platform(payload.platforms[0] if payload.platforms else "youtube"),
+        publish_at=weekly_compilation_schedule(session, after=story_schedule_end),
+        approved_at=datetime.now(timezone.utc),
     )
     session.add(release)
     story.status = StoryStatus.QUEUED.value

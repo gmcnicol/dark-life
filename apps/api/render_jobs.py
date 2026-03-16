@@ -31,7 +31,7 @@ from .models import (
     Story,
     StoryPart,
 )
-from .publishing import delivery_mode_for_platform
+from .publishing import approval_payload_status, delivery_mode_for_platform, ensure_publish_job
 from .pipeline import release_for_artifact
 
 router = APIRouter(prefix="/render-jobs", tags=["render-jobs"])
@@ -316,11 +316,26 @@ def update_render_job_status(
             compilation_id=job.compilation_id,
         ):
             release.render_artifact_id = artifact.id
-            release.status = ReleaseStatus.READY.value
-            release.publish_status = ReleaseStatus.READY.value
-            release.approval_status = PublishApprovalStatus.PENDING.value
             release.delivery_mode = delivery_mode_for_platform(release.platform)
             release.last_error = None
+            if release.approval_status == PublishApprovalStatus.APPROVED.value:
+                next_status = approval_payload_status(release.publish_at)
+                release.status = next_status
+                release.publish_status = next_status
+                ensure_publish_job(
+                    session,
+                    release,
+                    not_before=release.publish_at,
+                    payload={
+                        "delivery_mode": release.delivery_mode,
+                        "variant": release.variant,
+                        "auto_scheduled": True,
+                    },
+                )
+            else:
+                release.status = ReleaseStatus.READY.value
+                release.publish_status = ReleaseStatus.READY.value
+                release.approval_status = PublishApprovalStatus.PENDING.value
             session.add(release)
         if job.compilation_id:
             compilation = session.get(Compilation, job.compilation_id)
