@@ -24,16 +24,11 @@ WORKDIR /app/apps/web
 
 ENV NODE_ENV=production
 
-# install pnpm for runtime scripts
-RUN npm install -g pnpm
-
 # copy built application and runtime deps
-COPY --from=builder /app/node_modules /app/node_modules
 COPY --from=builder /app/apps/web/dist ./dist
-COPY --from=builder /app/apps/web/package.json ./package.json
-COPY --from=builder /app/apps/web/node_modules ./node_modules
+COPY --from=builder /app/apps/web/server.mjs ./server.mjs
 
 ENV PORT=3000
 EXPOSE 3000
 
-CMD ["./node_modules/.bin/vite", "preview", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["node", "server.mjs"]

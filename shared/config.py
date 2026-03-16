@@ -24,6 +24,9 @@ MUSIC_DIR = Path(
 )
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/output"))
 TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/renderer"))
+REMOTE_ASSET_CACHE_DIR = Path(
+    os.getenv("REMOTE_ASSET_CACHE_DIR", str(Path(CONTENT_DIR) / "cache" / "remote-assets"))
+)
 
 
 class Settings(BaseSettings):
@@ -34,6 +37,7 @@ class Settings(BaseSettings):
     MUSIC_DIR: Path = Field(default=MUSIC_DIR)
     OUTPUT_DIR: Path = Field(default=OUTPUT_DIR)
     TMP_DIR: Path = Field(default=TMP_DIR)
+    REMOTE_ASSET_CACHE_DIR: Path = Field(default=REMOTE_ASSET_CACHE_DIR)
     STORIES_DIR: Path = Field(default_factory=lambda: CONTENT_DIR / "stories")
     AUDIO_DIR: Path = Field(default_factory=lambda: CONTENT_DIR / "audio")
     VISUALS_DIR: Path = Field(default_factory=lambda: CONTENT_DIR / "visuals")
@@ -87,6 +91,10 @@ class Settings(BaseSettings):
     POLL_INTERVAL_MS: int = Field(
         default=5000,
         description="Polling interval for renderer worker in milliseconds",
+    )
+    HEARTBEAT_INTERVAL_SEC: int = Field(
+        default=10,
+        description="Renderer heartbeat interval in seconds",
     )
     MAX_CONCURRENT: int = Field(
         default=1,
@@ -149,6 +157,9 @@ class Settings(BaseSettings):
     WHISPER_MODEL: str = Field(
         default="base", description="Whisper model size"
     )
+    WHISPER_PROVIDER: str = Field(
+        default="local", description="Subtitle provider (local or openai)"
+    )
     WHISPER_DEVICE: str = Field(
         default="cpu", description="Device for Whisper inference"
     )
@@ -165,6 +176,14 @@ class Settings(BaseSettings):
     OPENAI_SCRIPT_MODEL: str = Field(
         default="gpt-4.1-mini",
         description="OpenAI model used for script adaptation",
+    )
+    PEXELS_API_KEY: str = Field(
+        default="",
+        description="Pexels API key for remote image search",
+    )
+    PIXABAY_API_KEY: str = Field(
+        default="",
+        description="Pixabay API key for remote image search",
     )
     SCHEDULER_INTERVAL_SEC: int = Field(
         default=3600,
@@ -201,4 +220,5 @@ __all__ = [
     "MUSIC_DIR",
     "OUTPUT_DIR",
     "TMP_DIR",
+    "REMOTE_ASSET_CACHE_DIR",
 ]

@@ -6,6 +6,7 @@ import hashlib
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -13,6 +14,13 @@ import requests
 
 from shared.config import settings
 from shared.logging import log_error, log_info
+
+
+@dataclass(frozen=True)
+class SynthesisResult:
+    path: Path
+    duration_ms: int
+    cache_hit: bool
 
 
 def _rate_limit() -> None:
@@ -110,6 +118,29 @@ def synthesize(
 ) -> Path:
     """Generate speech for ``text`` writing ``out_path`` and returning it."""
 
+    return synthesize_result(
+        text,
+        story_id=story_id,
+        part_id=part_id,
+        out_path=out_path,
+        voice_id=voice_id,
+        model_id=model_id,
+        session=session,
+    ).path
+
+
+def synthesize_result(
+    text: str,
+    *,
+    story_id: str | int,
+    part_id: str | int,
+    out_path: Path,
+    voice_id: str | None = None,
+    model_id: str | None = None,
+    session: requests.sessions.Session | None = None,
+) -> SynthesisResult:
+    """Generate speech for ``text`` writing ``out_path`` and returning metadata."""
+
     voice = voice_id or settings.ELEVENLABS_VOICE_ID
     model = model_id or settings.ELEVENLABS_MODEL_ID
     if not (settings.ELEVENLABS_API_KEY and voice):
@@ -120,7 +151,8 @@ def synthesize(
     key = cache_key(story_id, part_id, voice, model, text)
     cache_path = cache_dir / f"{key}.wav"
 
-    if cache_path.exists():
+    cache_hit = cache_path.exists()
+    if cache_hit:
         log_info("tts_cache_hit", story_id=story_id, part_id=part_id, path=str(cache_path))
     else:
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice}"
@@ -163,8 +195,7 @@ def synthesize(
         duration_ms=duration_ms,
         path=str(out_path),
     )
-    return out_path
+    return SynthesisResult(path=out_path, duration_ms=duration_ms, cache_hit=cache_hit)
 
 
-__all__ = ["cache_key", "synthesize"]
-
+__all__ = ["SynthesisResult", "cache_key", "synthesize", "synthesize_result"]

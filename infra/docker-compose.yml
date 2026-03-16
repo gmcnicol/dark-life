@@ -52,7 +52,7 @@ services:
       dockerfile: apps/web/Dockerfile
     env_file: ../.env
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
     ports:
       - "3000:3000"
     depends_on:
@@ -69,15 +69,14 @@ services:
     build:
       context: ..
       dockerfile: services/renderer/Dockerfile
-    command: python -u services/renderer/poller.py
+    command: python -u -m services.renderer.poller
     env_file: ../.env
     environment:
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:
-      - ../content:/content:ro
+      - ../content:/content
       - ../output:/output
-      - ../content/tts_cache:/content/tts_cache
     logging:
       driver: json-file
       options:

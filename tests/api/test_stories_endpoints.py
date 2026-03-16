@@ -1,5 +1,3 @@
-import subprocess
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
@@ -7,8 +5,8 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from apps.api.db import get_session
 import apps.api.main as main
+import apps.api.stories as stories_api
 from apps.api.pipeline import ensure_default_presets
-from shared.config import settings
 
 
 @pytest.fixture(name="client")
@@ -51,23 +49,23 @@ def test_generate_script_and_parts(client):
 
 def test_create_bundle_and_release_jobs(client, tmp_path, monkeypatch: pytest.MonkeyPatch):
     client, engine = client
-    visuals_dir = tmp_path / "visuals"
-    visuals_dir.mkdir()
-    asset_path = visuals_dir / "fog.mp4"
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=160x280:d=1",
-            str(asset_path),
+    monkeypatch.setattr(
+        stories_api,
+        "_fetch_pixabay_assets",
+        lambda keywords: [
+            {
+                "remote_url": "https://example.com/fog.jpg",
+                "provider": "pixabay",
+                "provider_id": "asset-1",
+                "type": "image",
+                "orientation": "portrait",
+                "tags": ["fog", "night"],
+                "width": 1080,
+                "height": 1920,
+                "attribution": "tester",
+            }
         ],
-        check=True,
     )
-    monkeypatch.setattr(settings, "CONTENT_DIR", tmp_path)
-    monkeypatch.setattr(settings, "VISUALS_DIR", visuals_dir)
 
     story = client.post("/stories", json={"title": "Pipeline", "body_md": "I walked home. I saw something in the fog. I kept moving."}).json()
     client.post(f"/stories/{story['id']}/script")
@@ -80,6 +78,7 @@ def test_create_bundle_and_release_jobs(client, tmp_path, monkeypatch: pytest.Mo
         json={"name": "Primary", "asset_ids": [assets[0]["id"]]},
     )
     assert bundle.status_code == 200
+    assert bundle.json()["part_asset_map"]
 
     releases = client.post(
         f"/stories/{story['id']}/releases",
@@ -112,3 +111,46 @@ def test_create_weekly_compilation(client):
 
     jobs = client.get("/jobs", params={"story_id": story["id"]}).json()
     assert any(job["kind"] == "render_compilation" for job in jobs)
+
+
+def test_bundle_rejects_incomplete_part_asset_map(client, monkeypatch: pytest.MonkeyPatch):
+    client, _engine = client
+    monkeypatch.setattr(
+        stories_api,
+        "_fetch_pixabay_assets",
+        lambda keywords: [
+            {
+                "remote_url": "https://example.com/fog.jpg",
+                "provider": "pixabay",
+                "provider_id": "asset-1",
+                "type": "image",
+                "orientation": "portrait",
+                "tags": ["fog"],
+                "width": 1080,
+                "height": 1920,
+                "attribution": "tester",
+            }
+        ],
+    )
+    story = client.post(
+        "/stories",
+        json={"title": "Mapping", "body_md": "One. Two. Three."},
+    ).json()
+    client.post(f"/stories/{story['id']}/script")
+    parts = client.put(
+        f"/stories/{story['id']}/parts",
+        json=[
+            {"body_md": "One.", "approved": True},
+            {"body_md": "Two. Three.", "approved": True},
+        ],
+    ).json()
+    assets = client.post(f"/stories/{story['id']}/assets/index").json()
+    res = client.post(
+        f"/stories/{story['id']}/asset-bundles",
+        json={
+            "name": "Primary",
+            "asset_ids": [assets[0]["id"]],
+            "part_asset_map": [{"story_part_id": parts[0]["id"], "asset_id": assets[0]["id"]}],
+        },
+    )
+    assert res.status_code == 400

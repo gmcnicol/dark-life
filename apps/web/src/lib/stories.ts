@@ -59,6 +59,7 @@ export interface AssetBundle {
   name: string;
   variant: RenderVariant;
   asset_ids: number[];
+  part_asset_map: Array<{ story_part_id: number; asset_id: number }>;
   music_policy: string;
   music_track?: string | null;
 }
@@ -206,6 +207,7 @@ export async function createAssetBundle(
   payload: {
     name: string;
     asset_ids: number[];
+    part_asset_map?: Array<{ story_part_id: number; asset_id: number }>;
     variant?: RenderVariant;
     music_policy?: string;
     music_track?: string | null;

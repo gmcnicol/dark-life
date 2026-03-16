@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "start": "vite preview --host 0.0.0.0 --port 3000",
+    "start": "node server.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
@@ -38,17 +38,11 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^5.2.0",
     "jsdom": "^26.1.0",
-    "msw": "^2.10.4",
     "prettier": "^3.6.2",
     "shadcn-ui": "^0.9.5",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^7.1.3",
     "vitest": "^3.2.4"
-  },
-  "msw": {
-    "workerDirectory": [
-      "public"
-    ]
   }
 }

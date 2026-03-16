@@ -5,20 +5,15 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import requests
-
 from shared.config import settings
+from .api_client import RenderApiClient
 
 HEARTBEAT_FILE = Path(settings.TMP_DIR) / "worker_heartbeat"
 
 
 def main() -> int:
     try:
-        resp = requests.get(
-            f"{settings.API_BASE_URL.rstrip('/')}/healthz",
-            timeout=5,
-        )
-        resp.raise_for_status()
+        RenderApiClient().list_jobs(status="queued", limit=1)
     except Exception:
         return 1
 

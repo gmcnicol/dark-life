@@ -1,13 +1,33 @@
-import { beforeAll, afterAll, afterEach, describe, expect, it } from "vitest";
-import { server } from "../mocks/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchCatalog } from "./catalog";
 
-beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("fetchCatalog", () => {
-  it("returns mocked images", async () => {
+  it("returns images from the API response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            id: 1,
+            type: "image",
+            local_path: "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==",
+          },
+          {
+            id: 2,
+            type: "image",
+            local_path: "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==",
+          },
+        ]),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
     const images = await fetchCatalog();
     expect(images).toHaveLength(2);
     expect(images[0]!.local_path).toBeDefined();

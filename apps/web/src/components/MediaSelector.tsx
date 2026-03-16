@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Asset, Story, StoryPart } from "@/lib/stories";
-import { createAssetBundle } from "@/lib/stories";
+import { createAssetBundle, indexStoryAssets } from "@/lib/stories";
 import { canManageMedia, STATUS_LABELS } from "@/lib/workflow";
-import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
+import { ActionButton, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 export default function MediaSelector({
   story,
@@ -21,8 +21,22 @@ export default function MediaSelector({
     assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.id),
   );
   const [isPending, startTransition] = useTransition();
+  const [isRefreshing, startRefreshTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const canSave = canManageMedia(story.status);
+
+  useEffect(() => {
+    setSelected((current) => {
+      if (assets.length === 0) {
+        return [];
+      }
+      const validCurrent = current.filter((id) => assets.some((asset) => asset.id === id));
+      if (validCurrent.length > 0) {
+        return validCurrent;
+      }
+      return assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.id);
+    });
+  }, [assets, parts.length]);
 
   const previewAssets = useMemo(
     () => selected.map((id) => assets.find((asset) => asset.id === id)).filter(Boolean) as Asset[],
@@ -49,13 +63,34 @@ export default function MediaSelector({
     startTransition(async () => {
       try {
         setError(null);
+        const fallbackAssetId = selected[0];
+        if (fallbackAssetId === undefined) {
+          throw new Error("Select at least one asset before saving the bundle");
+        }
+        const partAssetMap = parts.map((part, index) => ({
+          story_part_id: part.id,
+          asset_id: selected[index] ?? fallbackAssetId,
+        }));
         await createAssetBundle(story.id, {
           name: "Primary bundle",
           asset_ids: selected,
+          part_asset_map: partAssetMap,
         });
         await queryClient.invalidateQueries();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to save bundle");
+      }
+    });
+  };
+
+  const refreshRemoteMatches = () => {
+    startRefreshTransition(async () => {
+      try {
+        setError(null);
+        await indexStoryAssets(story.id);
+        await queryClient.invalidateQueries({ queryKey: ["story-assets", story.id] });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to fetch remote matches");
       }
     });
   };
@@ -80,6 +115,9 @@ export default function MediaSelector({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <ActionButton onClick={refreshRemoteMatches} tone="secondary" disabled={isRefreshing}>
+            {isRefreshing ? "Fetching Pixabay matches…" : "Fetch remote matches"}
+          </ActionButton>
           <ActionButton onClick={autoAssign} tone="secondary" disabled={!canSave}>
             Apply best matches
           </ActionButton>
@@ -97,9 +135,21 @@ export default function MediaSelector({
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {assets.map((asset) => {
+          {assets.length === 0 ? (
+            <div className="md:col-span-2 2xl:col-span-3">
+              <EmptyState
+                title="No remote media matches yet"
+                description="Fetch Pixabay matches for this story. If nothing returns, check the story keywords and make sure `PIXABAY_API_KEY` is configured for the API service."
+                action={
+                  <ActionButton onClick={refreshRemoteMatches} disabled={isRefreshing}>
+                    {isRefreshing ? "Fetching…" : "Fetch Pixabay matches"}
+                  </ActionButton>
+                }
+              />
+            </div>
+          ) : assets.map((asset) => {
             const selectedAsset = selected.includes(asset.id);
-            const previewSrc = asset.local_path || asset.remote_url || "";
+            const previewSrc = asset.remote_url || asset.local_path || "";
             return (
               <button
                 key={asset.id}
@@ -107,12 +157,29 @@ export default function MediaSelector({
                 onClick={() => toggleAsset(asset.id)}
                 disabled={!canSave}
                 data-testid={selectedAsset ? `catalog-img-${asset.id}` : undefined}
-                className={`overflow-hidden rounded-[1.6rem] border p-3 text-left transition ${
+                className={`relative overflow-hidden rounded-[1.6rem] border p-3 text-left transition ${
                   selectedAsset
-                    ? "border-cyan-300/35 bg-cyan-300/[0.08]"
+                    ? "border-cyan-300/50 bg-cyan-300/[0.12] shadow-[0_18px_40px_rgba(34,211,238,0.14)]"
                     : "border-white/8 bg-white/[0.03] hover:border-white/14 hover:bg-white/[0.05]"
                 } ${!canSave ? "cursor-not-allowed opacity-60" : ""}`}
               >
+                <div className="absolute right-3 top-3 z-10">
+                  {selectedAsset ? (
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-200/40 bg-cyan-300 text-slate-950 shadow-[0_10px_24px_rgba(34,211,238,0.35)]">
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 16 16"
+                        className="h-4 w-4 fill-none stroke-current stroke-[2.2]"
+                      >
+                        <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+                      </svg>
+                    </span>
+                  ) : (
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-black/35 text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-white/70">
+                      Pick
+                    </span>
+                  )}
+                </div>
                 <div className="aspect-[9/16] overflow-hidden rounded-[1.2rem] bg-black/20">
                   {asset.type === "video" ? (
                     <video src={previewSrc} muted className="h-full w-full object-cover" />
@@ -126,6 +193,11 @@ export default function MediaSelector({
                   </p>
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
                     {(asset.tags || []).slice(0, 4).join(" · ") || "library asset"}
+                  </p>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+                    selectedAsset ? "text-cyan-100" : "text-white/45"
+                  }`}>
+                    {selectedAsset ? "Selected for bundle" : "Available"}
                   </p>
                 </div>
               </button>

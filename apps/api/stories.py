@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 from typing import Any
+import requests
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from shared.config import settings
 from shared.workflow import ReleaseStatus, RenderVariant, StoryStatus, can_transition_story
 
 from .db import get_session
@@ -40,8 +42,6 @@ from .pipeline import (
     create_short_releases,
     create_weekly_compilation,
     ensure_default_presets,
-    index_local_assets,
-    best_assets_for_story,
     upsert_script,
 )
 
@@ -54,6 +54,28 @@ CHARS_PER_SECOND = WORDS_PER_SECOND * CHARS_PER_WORD
 MIN_PART_SECONDS = 30
 MAX_PART_SECONDS = 75
 SENTENCE_RE = re.compile(r"[^.!?]+[.!?](?:\s+|$)")
+REMOTE_IMAGE_KEYWORDS = (
+    "shadow",
+    "hallway",
+    "forest",
+    "basement",
+    "attic",
+    "fog",
+    "night",
+    "road",
+    "window",
+    "cabin",
+    "lake",
+    "storm",
+    "door",
+    "apartment",
+    "corridor",
+    "graveyard",
+    "empty",
+    "abandoned",
+    "woods",
+    "house",
+)
 
 
 class PartInput(BaseModel):
@@ -66,6 +88,7 @@ class PartInput(BaseModel):
 class AssetBundleCreate(BaseModel):
     name: str = "Primary bundle"
     asset_ids: list[int]
+    part_asset_map: list[dict[str, int]] | None = None
     variant: str = RenderVariant.SHORT.value
     music_policy: str = "first"
     music_track: str | None = None
@@ -93,8 +116,182 @@ def _get_story(session: Session, story_id: int) -> Story:
     return story
 
 
+def _extract_image_keywords(story: Story) -> str:
+    text = f"{story.title} {story.body_md or ''}".lower()
+    matched = [keyword for keyword in REMOTE_IMAGE_KEYWORDS if keyword in text]
+    title_words = [
+        token
+        for token in re.findall(r"[a-zA-Z]{4,}", story.title.lower())
+        if token not in matched
+    ]
+    keywords = list(dict.fromkeys([*matched, *title_words[:4]]))
+    return " ".join(keywords[:6]) or story.title
+
+
+def _list_existing_story_images(session: Session, story_id: int) -> list[Asset]:
+    return session.exec(
+        select(Asset)
+        .where(Asset.story_id == story_id, Asset.type == "image")
+        .order_by(Asset.rank.is_(None), Asset.rank, Asset.id.desc())
+    ).all()
+
+
+def _fetch_pixabay_assets(keywords: str) -> list[dict[str, Any]]:
+    if not settings.PIXABAY_API_KEY:
+        return []
+    try:
+        response = requests.get(
+            "https://pixabay.com/api/",
+            params={
+                "key": settings.PIXABAY_API_KEY,
+                "q": keywords,
+                "image_type": "photo",
+                "orientation": "vertical",
+                "per_page": 12,
+                "safesearch": "true",
+            },
+            timeout=12,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return []
+
+    assets: list[dict[str, Any]] = []
+    for hit in payload.get("hits", []):
+        remote_url = hit.get("webformatURL") or hit.get("largeImageURL")
+        if not remote_url:
+            continue
+        assets.append(
+            {
+                "remote_url": remote_url,
+                "provider": "pixabay",
+                "provider_id": str(hit.get("id")),
+                "type": "image",
+                "orientation": "portrait" if (hit.get("imageHeight", 0) or 0) >= (hit.get("imageWidth", 0) or 0) else "landscape",
+                "tags": [tag.strip() for tag in str(hit.get("tags", "")).split(",") if tag.strip()],
+                "width": hit.get("imageWidth"),
+                "height": hit.get("imageHeight"),
+                "attribution": hit.get("user"),
+            }
+        )
+    return assets
+
+
+def _fetch_and_store_story_images(session: Session, story: Story) -> list[Asset]:
+    keywords = _extract_image_keywords(story)
+    fetched = _fetch_pixabay_assets(keywords)
+    existing = _list_existing_story_images(session, story.id)
+    existing_urls = {asset.remote_url for asset in existing if asset.remote_url}
+    created: list[Asset] = []
+    next_rank = len(existing)
+
+    for result in fetched:
+        remote_url = result["remote_url"]
+        if remote_url in existing_urls:
+            continue
+        asset = Asset(
+            story_id=story.id,
+            type="image",
+            remote_url=remote_url,
+            source="remote",
+            provider=result.get("provider"),
+            provider_id=result.get("provider_id"),
+            selected=False,
+            rank=next_rank,
+            orientation=result.get("orientation"),
+            tags=result.get("tags"),
+            width=result.get("width"),
+            height=result.get("height"),
+            attribution=result.get("attribution"),
+        )
+        session.add(asset)
+        created.append(asset)
+        existing_urls.add(remote_url)
+        next_rank += 1
+
+    if created:
+        session.commit()
+        for asset in created:
+            session.refresh(asset)
+
+    return _list_existing_story_images(session, story.id)
+
+
 def _estimate_seconds(text: str) -> int:
     return max(1, int(round(len(text) / CHARS_PER_SECOND)))
+
+
+def _ordered_part_asset_map(parts: list[StoryPart], asset_ids: list[int]) -> list[dict[str, int]]:
+    if not parts or not asset_ids:
+        return []
+    mapped: list[dict[str, int]] = []
+    fallback_asset_id = asset_ids[0]
+    for index, part in enumerate(parts):
+        asset_id = asset_ids[index] if index < len(asset_ids) else fallback_asset_id
+        mapped.append({"story_part_id": part.id, "asset_id": asset_id})
+    return mapped
+
+
+def _normalize_part_asset_map(raw_map: list[dict[str, int]] | None) -> list[dict[str, int]]:
+    if not raw_map:
+        return []
+    normalized: list[dict[str, int]] = []
+    for row in raw_map:
+        story_part_id = int(row["story_part_id"])
+        asset_id = int(row["asset_id"])
+        normalized.append({"story_part_id": story_part_id, "asset_id": asset_id})
+    return normalized
+
+
+def _resolve_bundle_part_asset_map(bundle: AssetBundle, parts: list[StoryPart]) -> list[dict[str, int]]:
+    part_asset_map = _normalize_part_asset_map(bundle.part_asset_map)
+    if part_asset_map:
+        return part_asset_map
+    return _ordered_part_asset_map(parts, bundle.asset_ids)
+
+
+def _validate_bundle_payload(
+    story: Story,
+    parts: list[StoryPart],
+    assets: list[Asset],
+    *,
+    asset_ids: list[int],
+    part_asset_map: list[dict[str, int]] | None,
+) -> tuple[list[int], list[dict[str, int]]]:
+    asset_ids = [int(asset_id) for asset_id in asset_ids]
+    assets_by_id = {asset.id: asset for asset in assets}
+    if len(assets_by_id) != len(asset_ids):
+        raise HTTPException(status_code=400, detail="Unknown asset id in bundle")
+    if any(asset.story_id not in {None, story.id} for asset in assets):
+        raise HTTPException(status_code=400, detail="Asset does not belong to story")
+
+    parts_by_id = {part.id: part for part in parts}
+    normalized_map = _normalize_part_asset_map(part_asset_map)
+    if not normalized_map:
+        normalized_map = _ordered_part_asset_map(parts, asset_ids)
+    if parts and not normalized_map:
+        raise HTTPException(status_code=400, detail="Bundle must assign an asset to each part")
+
+    seen_parts: set[int] = set()
+    for row in normalized_map:
+        story_part_id = row["story_part_id"]
+        asset_id = row["asset_id"]
+        if story_part_id in seen_parts:
+            raise HTTPException(status_code=400, detail="Duplicate story part in part_asset_map")
+        if story_part_id not in parts_by_id:
+            raise HTTPException(status_code=400, detail="Unknown story part in part_asset_map")
+        if asset_id not in assets_by_id:
+            raise HTTPException(status_code=400, detail="Unknown asset id in part_asset_map")
+        seen_parts.add(story_part_id)
+
+    if len(seen_parts) != len(parts_by_id):
+        raise HTTPException(status_code=400, detail="Bundle must cover every story part")
+
+    normalized_asset_ids = list(dict.fromkeys([row["asset_id"] for row in normalized_map]))
+    if not normalized_asset_ids:
+        raise HTTPException(status_code=400, detail="Bundle must include at least one asset")
+    return normalized_asset_ids, normalized_map
 
 
 def _sentence_spans(text: str) -> list[tuple[str, int, int]]:
@@ -297,7 +494,6 @@ def list_asset_library(
     asset_type: str | None = Query(default=None, alias="type"),
     session: Session = Depends(get_session),
 ) -> list[Asset]:
-    index_local_assets(session)
     query = select(Asset).where(Asset.story_id.is_(None))
     if asset_type:
         query = query.where(Asset.type == asset_type)
@@ -316,25 +512,34 @@ def list_asset_library(
 @router.post("/stories/{story_id}/assets/index", response_model=list[AssetRead])
 def index_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[Asset]:
     story = _get_story(session, story_id)
-    index_local_assets(session)
-    return best_assets_for_story(session, story)
+    return _fetch_and_store_story_images(session, story)
 
 
 @router.get("/stories/{story_id}/assets", response_model=list[AssetRead])
 def list_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[Asset]:
     story = _get_story(session, story_id)
-    index_local_assets(session)
-    return best_assets_for_story(session, story)
+    existing = _list_existing_story_images(session, story_id)
+    if existing:
+        return existing
+    return _fetch_and_store_story_images(session, story)
 
 
 @router.get("/stories/{story_id}/asset-bundles", response_model=list[AssetBundleRead])
 def list_asset_bundles(story_id: int, session: Session = Depends(get_session)) -> list[AssetBundle]:
     _get_story(session, story_id)
-    return session.exec(
+    parts = session.exec(
+        select(StoryPart)
+        .where(StoryPart.story_id == story_id)
+        .order_by(StoryPart.index)
+    ).all()
+    bundles = session.exec(
         select(AssetBundle)
         .where(AssetBundle.story_id == story_id)
         .order_by(AssetBundle.id.desc())
     ).all()
+    for bundle in bundles:
+        bundle.part_asset_map = _resolve_bundle_part_asset_map(bundle, parts)
+    return bundles
 
 
 @router.post("/stories/{story_id}/asset-bundles", response_model=AssetBundleRead)
@@ -344,14 +549,28 @@ def create_bundle(
     session: Session = Depends(get_session),
 ) -> AssetBundle:
     story = _get_story(session, story_id)
-    assets = session.exec(select(Asset).where(Asset.id.in_(bundle_in.asset_ids))).all()
-    if len(assets) != len(bundle_in.asset_ids):
-        raise HTTPException(status_code=400, detail="Unknown asset id in bundle")
+    parts = session.exec(
+        select(StoryPart)
+        .where(StoryPart.story_id == story_id)
+        .order_by(StoryPart.index)
+    ).all()
+    requested_asset_ids = bundle_in.asset_ids or [
+        int(row["asset_id"]) for row in (bundle_in.part_asset_map or [])
+    ]
+    assets = session.exec(select(Asset).where(Asset.id.in_(requested_asset_ids))).all()
+    asset_ids, part_asset_map = _validate_bundle_payload(
+        story,
+        parts,
+        assets,
+        asset_ids=requested_asset_ids,
+        part_asset_map=bundle_in.part_asset_map,
+    )
     bundle = create_asset_bundle(
         session,
         story,
         name=bundle_in.name,
-        asset_ids=bundle_in.asset_ids,
+        asset_ids=asset_ids,
+        part_asset_map=part_asset_map,
         variant=bundle_in.variant,
         music_policy=bundle_in.music_policy,
         music_track=bundle_in.music_track,
@@ -384,6 +603,14 @@ def create_releases(
     bundle = session.get(AssetBundle, bundle_id)
     if not bundle:
         raise HTTPException(status_code=404, detail="Asset bundle not found")
+    parts = session.exec(
+        select(StoryPart)
+        .where(StoryPart.story_id == story_id)
+        .order_by(StoryPart.index)
+    ).all()
+    bundle.part_asset_map = _resolve_bundle_part_asset_map(bundle, parts)
+    if parts and len(bundle.part_asset_map) != len(parts):
+        raise HTTPException(status_code=400, detail="Asset bundle must cover every story part")
     releases, _jobs = create_short_releases(
         session,
         story,
@@ -501,6 +728,8 @@ def story_overview(story_id: int, session: Session = Depends(get_session)) -> di
         .where(AssetBundle.story_id == story_id)
         .order_by(AssetBundle.id.desc())
     ).all()
+    for bundle in bundles:
+        bundle.part_asset_map = _resolve_bundle_part_asset_map(bundle, parts)
     releases = session.exec(
         select(Release).where(Release.story_id == story_id).order_by(Release.id.desc())
     ).all()

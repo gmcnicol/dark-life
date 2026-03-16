@@ -24,12 +24,14 @@ COPY shared /app/shared
 # the poller as a script.
 ENV PYTHONPATH=/app \
     WHISPER_MODEL=base \
+    WHISPER_PROVIDER=local \
     OUTPUT_DIR=/output \
-    TMPDIR=/tmp/render \
+    REMOTE_ASSET_CACHE_DIR=/content/cache/remote-assets \
+    TMP_DIR=/tmp/renderer \
     PYTHONUNBUFFERED=1
 
 VOLUME ["/output"]
 
-CMD ["python", "-u", "services/renderer/poller.py"]
+CMD ["python", "-u", "-m", "services.renderer.poller"]
 
 HEALTHCHECK CMD ["python", "-m", "services.renderer.healthcheck"]

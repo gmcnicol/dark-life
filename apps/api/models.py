@@ -166,6 +166,7 @@ class AssetBundleBase(SQLModel):
     name: str
     variant: str = Field(default=RenderVariant.SHORT.value)
     asset_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    part_asset_map: list[dict[str, int]] = Field(default_factory=list, sa_column=Column(JSON))
     music_policy: str = "first"
     music_track: str | None = None
 
@@ -275,6 +276,7 @@ class JobRead(SQLModel):
     kind: str
     variant: str
     status: str
+    correlation_id: str | None = None
     payload: dict | None = None
     result: dict | None = None
     error_class: str | None = None

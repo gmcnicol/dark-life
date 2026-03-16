@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlmodel import Field, SQLModel, Session, select
 
+from shared.config import settings
 from shared.workflow import JobStatus, ReleaseStatus, StoryStatus, can_transition_job
 
 from .db import get_session
 from .models import (
+    Asset,
+    AssetBundle,
     Compilation,
     Job,
     JobRead,
     Release,
     RenderArtifact,
+    RenderPreset,
+    ScriptVersion,
     Story,
+    StoryPart,
 )
 from .pipeline import release_for_artifact
 
@@ -42,11 +49,98 @@ class RenderJobStatusUpdate(SQLModel):
     details: dict | None = Field(default=None, alias="metadata")
 
 
+def require_worker_token(authorization: str | None = Header(default=None)) -> None:
+    expected = settings.API_AUTH_TOKEN
+    if not expected or not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    if token != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _normalize_part_asset_map(bundle: AssetBundle, parts: list[StoryPart]) -> list[dict[str, int]]:
+    if bundle.part_asset_map:
+        return [
+            {"story_part_id": int(row["story_part_id"]), "asset_id": int(row["asset_id"])}
+            for row in bundle.part_asset_map
+        ]
+    if not bundle.asset_ids:
+        return []
+    fallback_asset_id = bundle.asset_ids[0]
+    return [
+        {
+            "story_part_id": part.id,
+            "asset_id": bundle.asset_ids[index] if index < len(bundle.asset_ids) else fallback_asset_id,
+        }
+        for index, part in enumerate(parts)
+    ]
+
+
+def _assemble_render_context(job: Job, session: Session) -> dict[str, Any]:
+    story = session.get(Story, job.story_id) if job.story_id else None
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    script_version_id = job.script_version_id or story.active_script_version_id
+    script_version = session.get(ScriptVersion, script_version_id) if script_version_id else None
+    render_preset = session.get(RenderPreset, job.render_preset_id) if job.render_preset_id else None
+    parts = session.exec(
+        select(StoryPart)
+        .where(StoryPart.story_id == story.id)
+        .order_by(StoryPart.index)
+    ).all()
+    bundle = session.get(AssetBundle, job.asset_bundle_id) if job.asset_bundle_id else None
+    part_asset_map: list[dict[str, int]] = _normalize_part_asset_map(bundle, parts) if bundle else []
+    asset_ids = list(dict.fromkeys([row["asset_id"] for row in part_asset_map] or (bundle.asset_ids if bundle else [])))
+    assets = session.exec(select(Asset).where(Asset.id.in_(asset_ids))).all() if asset_ids else []
+    assets_by_id = {asset.id: asset for asset in assets}
+    selected_asset = None
+    story_part = None
+    if job.story_part_id:
+        story_part = session.get(StoryPart, job.story_part_id)
+        selected_row = next((row for row in part_asset_map if row["story_part_id"] == job.story_part_id), None)
+        if selected_row:
+            selected_asset = assets_by_id.get(selected_row["asset_id"])
+
+    compilation = session.get(Compilation, job.compilation_id) if job.compilation_id else None
+    prior_artifacts = session.exec(
+        select(RenderArtifact)
+        .where(RenderArtifact.story_id == story.id)
+        .order_by(RenderArtifact.id.desc())
+    ).all()
+    releases = session.exec(
+        select(Release)
+        .where(Release.story_id == story.id)
+        .order_by(Release.id.desc())
+    ).all()
+
+    bundle_data = None
+    if bundle:
+        bundle_data = bundle.model_dump()
+        bundle_data["part_asset_map"] = part_asset_map
+
+    return {
+        "job": JobRead.model_validate(job).model_dump(),
+        "story": story.model_dump(),
+        "story_part": story_part.model_dump() if story_part else None,
+        "compilation": compilation.model_dump() if compilation else None,
+        "script_version": script_version.model_dump() if script_version else None,
+        "render_preset": render_preset.model_dump() if render_preset else None,
+        "asset_bundle": bundle_data,
+        "assets": [asset.model_dump() for asset in assets],
+        "selected_asset": selected_asset.model_dump() if selected_asset else None,
+        "parts": [part.model_dump() for part in parts],
+        "artifacts": [artifact.model_dump() for artifact in prior_artifacts],
+        "releases": [release.model_dump() for release in releases],
+    }
+
+
 @router.get("/", response_model=list[JobRead])
 def list_render_jobs(
     status: str | None = None,
     limit: int = 100,
     session: Session = Depends(get_session),
+    _: None = Depends(require_worker_token),
 ) -> list[Job]:
     query = select(Job).where(Job.kind.ilike("render_%"))
     if status:
@@ -60,6 +154,7 @@ def claim_render_job(
     job_id: int,
     request: ClaimRequest,
     session: Session = Depends(get_session),
+    _: None = Depends(require_worker_token),
 ) -> dict:
     job = session.get(Job, job_id)
     if not job:
@@ -75,7 +170,11 @@ def claim_render_job(
 
 
 @router.post("/{job_id}/heartbeat")
-def heartbeat_render_job(job_id: int, session: Session = Depends(get_session)) -> dict:
+def heartbeat_render_job(
+    job_id: int,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_worker_token),
+) -> dict:
     job = session.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -88,6 +187,18 @@ def heartbeat_render_job(job_id: int, session: Session = Depends(get_session)) -
     session.commit()
     session.refresh(job)
     return {"lease_expires_at": job.lease_expires_at}
+
+
+@router.get("/{job_id}/context")
+def get_render_job_context(
+    job_id: int,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_worker_token),
+) -> dict[str, Any]:
+    job = session.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _assemble_render_context(job, session)
 
 
 def _upsert_artifact(job: Job, update: RenderJobStatusUpdate, session: Session) -> RenderArtifact | None:
@@ -128,6 +239,7 @@ def update_render_job_status(
     job_id: int,
     update: RenderJobStatusUpdate,
     session: Session = Depends(get_session),
+    _: None = Depends(require_worker_token),
 ) -> Job:
     job = session.get(Job, job_id)
     if not job:

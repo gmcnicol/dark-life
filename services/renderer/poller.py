@@ -17,10 +17,11 @@ from shared.config import settings
 from shared.logging import log_error, log_info
 from shared.workflow import JobStatus
 
-from . import ffmpeg, music, subtitles, tts
+from .api_client import RenderApiClient, auth_headers
+from .executor import CommandExecutionError, CommandTimeoutError
+from .pipeline import render_job as render_pipeline_job
 
 
-HEARTBEAT_INTERVAL = 10  # seconds
 DISK_MIN_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
 HEARTBEAT_FILE = Path(settings.TMP_DIR) / "worker_heartbeat"
 
@@ -34,12 +35,6 @@ def backoff_schedule(
         jitter_ms = rand() * delay_ms
         yield (delay_ms + jitter_ms) / 1000.0
         delay_ms = max(base_ms, int(delay_ms * factor))
-
-
-def _headers() -> dict[str, str]:
-    if settings.API_AUTH_TOKEN:
-        return {"Authorization": f"Bearer {settings.API_AUTH_TOKEN}"}
-    return {}
 
 
 def _check_disk(job_id: int | str, cid: str) -> bool:
@@ -62,155 +57,14 @@ def _validate_runtime() -> None:
         log_info("config_warning", field="ELEVENLABS_VOICE_ID", message="TTS voice is unset")
     Path(settings.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     Path(settings.TMP_DIR).mkdir(parents=True, exist_ok=True)
+    Path(settings.REMOTE_ASSET_CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
 
 def poll_jobs(session: requests.sessions.Session | None = None) -> list[dict]:
-    sess = session or requests
-    base = settings.API_BASE_URL.rstrip("/")
-    resp = sess.get(
-        f"{base}/render-jobs",
-        params={"status": JobStatus.QUEUED.value, "limit": settings.MAX_CLAIM},
-        timeout=30,
-        headers=_headers(),
-    )
-    resp.raise_for_status()
-    jobs = resp.json() or []
+    client = RenderApiClient(session or requests)
+    jobs = client.list_jobs(status=JobStatus.QUEUED.value, limit=settings.MAX_CLAIM)
     log_info("poll", cid="poll", count=len(jobs))
     return jobs
-
-
-def _get_json(path: str, *, session: requests.sessions.Session | None = None) -> dict | list:
-    sess = session or requests
-    base = settings.API_BASE_URL.rstrip("/")
-    resp = sess.get(f"{base}{path}", timeout=30, headers=_headers())
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _fetch_story_context(job: dict, session: requests.sessions.Session | None = None) -> tuple[dict, dict]:
-    story_id = job.get("story_id")
-    if not story_id:
-        raise ValueError("Job missing story_id")
-    overview = _get_json(f"/stories/{story_id}/overview", session=session)
-    presets = _get_json("/render-presets", session=session)
-    context = {
-        "overview": overview,
-        "presets": {preset["id"]: preset for preset in presets},
-    }
-    return overview, context["presets"]
-
-
-def _asset_path(overview: dict, bundle_id: int | None) -> Path:
-    bundles = {bundle["id"]: bundle for bundle in overview.get("asset_bundles", [])}
-    bundle = bundles.get(bundle_id or 0)
-    if not bundle or not bundle.get("asset_ids"):
-        raise FileNotFoundError("Asset bundle has no assets")
-    library = {
-        asset["id"]: asset
-        for asset in _get_json("/assets/library")  # type: ignore[arg-type]
-    }
-    asset = library.get(bundle["asset_ids"][0])
-    if not asset:
-        raise FileNotFoundError("Selected asset not found in library")
-    if not asset.get("local_path"):
-        raise FileNotFoundError("Selected asset missing local path")
-    return Path(asset["local_path"])
-
-
-def _render_short_job(job: dict, session: requests.sessions.Session | None = None) -> dict[str, object]:
-    overview, presets = _fetch_story_context(job, session=session)
-    parts = {part["id"]: part for part in overview.get("parts", [])}
-    part = parts.get(job.get("story_part_id"))
-    if not part:
-        raise FileNotFoundError("Story part not found")
-    preset = presets.get(job.get("payload", {}).get("render_preset_id") or job.get("render_preset_id"))
-    if not preset:
-        raise FileNotFoundError("Render preset not found")
-    job_id = str(job["id"])
-    job_dir = Path(settings.TMP_DIR) / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-
-    voice_path = job_dir / "vo.wav"
-    tts.synthesize(
-        part["script_text"] or part["body_md"],
-        story_id=job["story_id"],
-        part_id=part["id"],
-        out_path=voice_path,
-        session=session,
-    )
-
-    subtitle_path = subtitles.generate(job_id=job_id, part_id=part["id"])
-    track = music.select_track(
-        overview.get("story", {}).get("music_track") or None,
-        required=False,
-    )
-    mix_path = job_dir / "mix.wav"
-    music.mix(voice_path, track, mix_path)
-
-    bg_asset = _asset_path(overview, job.get("asset_bundle_id") or job.get("payload", {}).get("asset_bundle_id"))
-    bg_video = job_dir / "bg.mp4"
-    ffmpeg.render_background(
-        bg_asset,
-        ffmpeg.probe_duration_ms(mix_path),
-        bg_video,
-        preset=preset,
-    )
-    output_name = (
-        f"story-{job['story_id']}-part-{part['index']}-"
-        f"script-{job.get('script_version_id')}-bundle-{job.get('asset_bundle_id')}-preset-{preset['slug']}"
-    )
-    video_path = ffmpeg.mux(bg_video, mix_path, output_name)
-    if preset.get("burn_subtitles"):
-        subtitled = video_path.with_name(video_path.stem + "-subtitled.mp4")
-        ffmpeg.burn_subtitles(video_path, subtitle_path, subtitled)
-        video_path = subtitled
-    final_subtitle = video_path.with_suffix(f".{settings.SUBTITLES_FORMAT.lower()}")
-    shutil.copyfile(subtitle_path, final_subtitle)
-    return {
-        "artifact_path": str(video_path),
-        "subtitle_path": str(final_subtitle),
-        "bytes": video_path.stat().st_size,
-        "duration_ms": ffmpeg.probe_duration_ms(video_path),
-        "metadata": {
-            "variant": job["variant"],
-            "preset_slug": preset["slug"],
-            "music_track": track.name if track else None,
-            "part_index": part["index"],
-        },
-    }
-
-
-def _render_weekly_job(job: dict, session: requests.sessions.Session | None = None) -> dict[str, object]:
-    overview, presets = _fetch_story_context(job, session=session)
-    preset = presets.get(job.get("payload", {}).get("render_preset_id") or job.get("render_preset_id"))
-    if not preset:
-        raise FileNotFoundError("Render preset not found")
-    artifacts = [
-        Path(artifact["video_path"])
-        for artifact in overview.get("artifacts", [])
-        if artifact.get("variant") == "short" and artifact.get("video_path")
-    ]
-    if not artifacts:
-        raise FileNotFoundError("Weekly compilation requires rendered short artifacts")
-    output_name = f"story-{job['story_id']}-weekly-{job.get('compilation_id')}"
-    out_path = Path(settings.OUTPUT_DIR) / f"{output_name}.mp4"
-    ffmpeg.concat_videos(artifacts, out_path)
-    return {
-        "artifact_path": str(out_path),
-        "bytes": out_path.stat().st_size,
-        "duration_ms": ffmpeg.probe_duration_ms(out_path),
-        "metadata": {
-            "variant": job["variant"],
-            "preset_slug": preset["slug"],
-            "part_count": len(artifacts),
-        },
-    }
-
-
-def render_job(job: dict, session: requests.sessions.Session | None = None) -> dict[str, object]:
-    if job["kind"] == "render_compilation":
-        return _render_weekly_job(job, session=session)
-    return _render_short_job(job, session=session)
 
 
 def _heartbeat_loop(
@@ -222,12 +76,12 @@ def _heartbeat_loop(
 ) -> None:
     sess = session or requests
     base = settings.API_BASE_URL.rstrip("/")
-    while not stop.wait(HEARTBEAT_INTERVAL):
+    while not stop.wait(settings.HEARTBEAT_INTERVAL_SEC):
         try:
             resp = sess.post(
                 f"{base}/render-jobs/{job_id}/heartbeat",
                 timeout=30,
-                headers=_headers(),
+                headers=auth_headers(),
             )
             if resp.status_code in (409, 410):
                 lost[0] = True
@@ -240,32 +94,42 @@ def _heartbeat_loop(
             log_error("heartbeat", cid=cid, job_id=job_id, error=str(exc))
 
 
+def render_job(job: dict, session: requests.sessions.Session | None = None) -> dict[str, object]:
+    client = RenderApiClient(session or requests)
+    context = client.get_context(int(job["id"]))
+    log_info(
+        "context",
+        job_id=job["id"],
+        story_id=context["story"]["id"],
+        part_id=(context.get("story_part") or {}).get("id"),
+        asset_id=(context.get("selected_asset") or {}).get("id"),
+    )
+    return render_pipeline_job(context, session=session)
+
+
 def process_job(job: dict, session: requests.sessions.Session | None = None) -> None:
     sess = session or requests
+    client = RenderApiClient(sess)
     base = settings.API_BASE_URL.rstrip("/")
-    job_id = job.get("id")
-    cid = str(uuid.uuid4())
+    job_id = int(job["id"])
+    cid = job.get("correlation_id") or str(uuid.uuid4())
+    job_dir = Path(settings.TMP_DIR) / str(job_id)
     if not _check_disk(job_id, cid):
         return
-    job_dir = Path(settings.TMP_DIR) / str(job_id)
+
     try:
-        resp = sess.post(
+        claim_response = sess.post(
             f"{base}/render-jobs/{job_id}/claim",
             json={"lease_seconds": settings.LEASE_SECONDS},
             timeout=30,
-            headers=_headers(),
+            headers=auth_headers(),
         )
-        if resp.status_code in (409, 410):
-            log_error("claim", cid=cid, job_id=job_id, status=resp.status_code)
+        if claim_response.status_code in (409, 410):
+            log_error("claim", cid=cid, job_id=job_id, status=claim_response.status_code)
             return
-        resp.raise_for_status()
+        claim_response.raise_for_status()
         log_info("claim", cid=cid, job_id=job_id)
-        sess.post(
-            f"{base}/render-jobs/{job_id}/status",
-            json={"status": JobStatus.RENDERING.value},
-            timeout=30,
-            headers=_headers(),
-        )
+        client.set_status(job_id, {"status": JobStatus.RENDERING.value})
 
         job_dir.mkdir(parents=True, exist_ok=True)
         stop = threading.Event()
@@ -283,10 +147,10 @@ def process_job(job: dict, session: requests.sessions.Session | None = None) -> 
         def _run_render() -> None:
             try:
                 result_holder.update(render_job(job, session=session))
-            except Exception as exc:  # pragma: no cover - surfaced below
+            except Exception as exc:
                 error_holder.append(exc)
 
-        worker = threading.Thread(target=_run_render)
+        worker = threading.Thread(target=_run_render, daemon=True)
         worker.start()
         worker.join(timeout=settings.JOB_TIMEOUT_SEC)
         stop.set()
@@ -294,54 +158,41 @@ def process_job(job: dict, session: requests.sessions.Session | None = None) -> 
 
         if worker.is_alive():
             log_error("error", cid=cid, job_id=job_id, error="timeout")
-            sess.post(
-                f"{base}/render-jobs/{job_id}/status",
-                json={"status": JobStatus.ERRORED.value, "error_message": "timeout"},
-                timeout=30,
-                headers=_headers(),
-            )
+            client.set_status(job_id, {"status": JobStatus.ERRORED.value, "error_message": "timeout"})
             return
         if lost[0]:
             log_error("error", cid=cid, job_id=job_id, error="lease_lost")
-            sess.post(
-                f"{base}/render-jobs/{job_id}/status",
-                json={"status": JobStatus.ERRORED.value, "error_message": "lease_lost"},
-                timeout=30,
-                headers=_headers(),
-            )
+            client.set_status(job_id, {"status": JobStatus.ERRORED.value, "error_message": "lease_lost"})
             return
         if error_holder:
             exc = error_holder[0]
+            payload = {
+                "status": JobStatus.ERRORED.value,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            }
+            if isinstance(exc, CommandExecutionError):
+                payload["stderr_snippet"] = exc.stderr
+            elif isinstance(exc, CommandTimeoutError):
+                payload["stderr_snippet"] = f"timeout:{exc.timeout_sec:.1f}s"
             log_error("error", cid=cid, job_id=job_id, error=str(exc))
-            sess.post(
-                f"{base}/render-jobs/{job_id}/status",
-                json={
-                    "status": JobStatus.ERRORED.value,
-                    "error_class": exc.__class__.__name__,
-                    "error_message": str(exc),
-                },
-                timeout=30,
-                headers=_headers(),
-            )
+            client.set_status(job_id, payload)
             return
 
-        sess.post(
-            f"{base}/render-jobs/{job_id}/status",
-            json={"status": JobStatus.RENDERED.value, **result_holder},
-            timeout=30,
-            headers=_headers(),
-        )
+        client.set_status(job_id, {"status": JobStatus.RENDERED.value, **result_holder})
         log_info("done", cid=cid, job_id=job_id)
     except Exception as exc:
         log_error("error", cid=cid, job_id=job_id, error=str(exc))
         try:
-            sess.post(
-                f"{base}/render-jobs/{job_id}/status",
-                json={"status": JobStatus.ERRORED.value, "error_message": str(exc)},
-                timeout=30,
-                headers=_headers(),
+            client.set_status(
+                job_id,
+                {
+                    "status": JobStatus.ERRORED.value,
+                    "error_class": exc.__class__.__name__,
+                    "error_message": str(exc),
+                },
             )
-        finally:
+        except Exception:
             pass
     finally:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -357,9 +208,14 @@ def run() -> None:  # pragma: no cover - continuous loop
         running: dict[int, object] = {}
         while True:
             HEARTBEAT_FILE.touch()
-            jobs = poll_jobs()
+            try:
+                jobs = poll_jobs()
+            except Exception as exc:
+                log_error("poll", error=str(exc))
+                time.sleep(next(backoff))
+                continue
             for job in jobs:
-                job_id = job.get("id")
+                job_id = int(job["id"])
                 if job_id in running or len(running) >= settings.MAX_CONCURRENT:
                     continue
                 future = pool.submit(process_job, job)
@@ -369,3 +225,7 @@ def run() -> None:  # pragma: no cover - continuous loop
 
 
 __all__ = ["backoff_schedule", "poll_jobs", "process_job", "render_job", "run"]
+
+
+if __name__ == "__main__":  # pragma: no cover - script entrypoint
+    run()

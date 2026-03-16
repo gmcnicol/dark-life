@@ -373,6 +373,7 @@ def create_asset_bundle(
     *,
     name: str,
     asset_ids: list[int],
+    part_asset_map: list[dict[str, int]] | None = None,
     variant: str = RenderVariant.SHORT.value,
     music_policy: str = "first",
     music_track: str | None = None,
@@ -382,6 +383,7 @@ def create_asset_bundle(
         name=name,
         variant=variant,
         asset_ids=asset_ids,
+        part_asset_map=part_asset_map or [],
         music_policy=music_policy,
         music_track=music_track,
     )

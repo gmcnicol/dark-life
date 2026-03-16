@@ -4,19 +4,10 @@ import QueryProvider from "@/components/query-provider";
 import App from "@/App";
 import "@/styles/globals.css";
 
-async function enableMocking() {
-  if (import.meta.env.DEV) {
-    const { worker } = await import("./mocks/browser");
-    await worker.start({ onUnhandledRequest: "bypass" });
-  }
-}
-
-void enableMocking().then(() => {
-  ReactDOM.createRoot(document.getElementById("root")!).render(
-    <BrowserRouter>
-      <QueryProvider>
-        <App />
-      </QueryProvider>
-    </BrowserRouter>,
-  );
-});
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <BrowserRouter>
+    <QueryProvider>
+      <App />
+    </QueryProvider>
+  </BrowserRouter>,
+);

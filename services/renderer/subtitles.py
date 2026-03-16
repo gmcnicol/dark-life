@@ -34,6 +34,14 @@ class Segment:
     text: str
 
 
+@dataclass(frozen=True)
+class SubtitleResult:
+    path: Path
+    provider: str
+    segments: int
+    duration_ms: int
+
+
 def _probe_duration_ms(path: Path) -> int:
     """Return media duration in milliseconds using ffprobe or wave fallback."""
     if shutil.which("ffprobe"):
@@ -170,18 +178,30 @@ def generate(*, job_id: str | int, part_id: str | int, video_path: Path | None =
     and the path to the new video file is returned instead.
     """
 
-    if WhisperModel is None:  # pragma: no cover - dependency missing
-        raise RuntimeError("faster-whisper is required to generate subtitles")
+    return generate_result(job_id=job_id, part_id=part_id, video_path=video_path).path
+
+
+def generate_result(
+    *,
+    job_id: str | int,
+    part_id: str | int,
+    video_path: Path | None = None,
+) -> SubtitleResult:
+    """Transcribe ``vo.wav`` for ``job_id`` and produce subtitles metadata."""
 
     job_dir = Path(settings.TMP_DIR) / str(job_id)
     vo_path = job_dir / "vo.wav"
     fmt = settings.SUBTITLES_FORMAT.lower()
     sub_path = job_dir / f"{part_id}.{fmt}"
 
-    if settings.OPENAI_API_KEY:
+    provider = "local"
+    if settings.WHISPER_PROVIDER == "openai" and settings.OPENAI_API_KEY:
+        provider = "openai"
         raw_segments = _openai_transcribe(vo_path)
         segments = _merge_short_segments(raw_segments)
     else:
+        if WhisperModel is None:  # pragma: no cover - dependency missing
+            raise RuntimeError("faster-whisper is required to generate subtitles")
         model = WhisperModel(settings.WHISPER_MODEL, device=settings.WHISPER_DEVICE)
         raw_segments, _info = model.transcribe(str(vo_path))
         segments = _merge_short_segments(
@@ -231,7 +251,12 @@ def generate(*, job_id: str | int, part_id: str | int, video_path: Path | None =
                 stderr=subprocess.PIPE,
                 check=True,
             )
-            return burned
+            return SubtitleResult(
+                path=burned,
+                provider=provider,
+                segments=len(segments),
+                duration_ms=int(total_dur * 1000),
+            )
         except Exception as exc:  # pragma: no cover - ffmpeg missing
             _log_warn(
                 "subs_burn_fail",
@@ -240,7 +265,12 @@ def generate(*, job_id: str | int, part_id: str | int, video_path: Path | None =
                 video=str(video_path),
                 error=str(exc),
             )
-    return sub_path
+    return SubtitleResult(
+        path=sub_path,
+        provider=provider,
+        segments=len(segments),
+        duration_ms=int(total_dur * 1000),
+    )
 
 
-__all__ = ["generate", "Segment", "_write_srt", "_write_vtt"]
+__all__ = ["SubtitleResult", "generate", "generate_result", "Segment", "_write_srt", "_write_vtt"]
