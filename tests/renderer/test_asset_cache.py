@@ -1,9 +1,6 @@
 from pathlib import Path
 
 from services.renderer.asset_cache import materialize_asset
-from shared.config import settings
-
-
 class FakeResponse:
     def __init__(self, content: bytes):
         self._content = content
@@ -26,10 +23,9 @@ class FakeSession:
         return FakeResponse(self.content)
 
 
-def test_remote_asset_cache_hit_and_miss(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "REMOTE_ASSET_CACHE_DIR", tmp_path / "cache")
+def test_remote_asset_materialization_uses_job_dir(tmp_path):
     asset = {
-        "id": 5,
+        "key": "pixabay:123",
         "type": "image",
         "provider": "pixabay",
         "provider_id": "123",
@@ -37,13 +33,14 @@ def test_remote_asset_cache_hit_and_miss(tmp_path, monkeypatch):
     }
     session = FakeSession(b"abc")
 
-    first = materialize_asset(asset, session=session)
-    second = materialize_asset(asset, session=session)
+    first = materialize_asset(asset, output_dir=tmp_path, session=session)
+    second = materialize_asset(asset, output_dir=tmp_path, session=session)
 
     assert first.path.exists()
     assert first.cache_hit is False
-    assert second.cache_hit is True
-    assert session.calls == 1
+    assert second.cache_hit is False
+    assert session.calls == 2
+    assert first.path.parent == tmp_path
 
 
 def test_local_asset_passthrough(tmp_path):

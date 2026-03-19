@@ -41,16 +41,24 @@ export interface StoryPart {
   approved: boolean;
 }
 
-export interface Asset {
-  id: number;
+export interface MediaRef {
+  key: string;
   story_id?: number | null;
   type: "image" | "video";
   local_path?: string | null;
   remote_url?: string | null;
+  provider?: string | null;
+  provider_id?: string | null;
   attribution?: string | null;
   orientation?: string | null;
   duration_ms?: number | null;
+  width?: number | null;
+  height?: number | null;
   tags?: string[] | null;
+}
+
+export interface Asset extends MediaRef {
+  id: number;
 }
 
 export interface AssetBundle {
@@ -58,8 +66,8 @@ export interface AssetBundle {
   story_id: number;
   name: string;
   variant: RenderVariant;
-  asset_ids: number[];
-  part_asset_map: Array<{ story_part_id: number; asset_id: number }>;
+  asset_refs: MediaRef[];
+  part_asset_map: Array<{ story_part_id: number; asset: MediaRef }>;
   music_policy: string;
   music_track?: string | null;
 }
@@ -192,12 +200,12 @@ export async function replaceStoryParts(
   });
 }
 
-export async function listStoryAssets(id: number): Promise<Asset[]> {
-  return apiFetch<Asset[]>(`/stories/${id}/assets`);
+export async function listStoryAssets(id: number): Promise<MediaRef[]> {
+  return apiFetch<MediaRef[]>(`/stories/${id}/assets`);
 }
 
-export async function indexStoryAssets(id: number): Promise<Asset[]> {
-  return apiFetch<Asset[]>(`/stories/${id}/assets/index`, { method: "POST" });
+export async function indexStoryAssets(id: number): Promise<MediaRef[]> {
+  return apiFetch<MediaRef[]>(`/stories/${id}/assets/index`, { method: "POST" });
 }
 
 export async function listLibraryAssets(params: {
@@ -219,8 +227,8 @@ export async function createAssetBundle(
   id: number,
   payload: {
     name: string;
-    asset_ids: number[];
-    part_asset_map?: Array<{ story_part_id: number; asset_id: number }>;
+    asset_refs: MediaRef[];
+    part_asset_map?: Array<{ story_part_id: number; asset: MediaRef }>;
     variant?: RenderVariant;
     music_policy?: string;
     music_track?: string | null;

@@ -18,8 +18,8 @@ from shared.workflow import (
 )
 
 from .db import get_session
+from .media_refs import bundle_asset_refs, bundle_part_asset_map
 from .models import (
-    Asset,
     AssetBundle,
     Compilation,
     Job,
@@ -64,25 +64,6 @@ def require_worker_token(authorization: str | None = Header(default=None)) -> No
     if token != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-
-def _normalize_part_asset_map(bundle: AssetBundle, parts: list[StoryPart]) -> list[dict[str, int]]:
-    if bundle.part_asset_map:
-        return [
-            {"story_part_id": int(row["story_part_id"]), "asset_id": int(row["asset_id"])}
-            for row in bundle.part_asset_map
-        ]
-    if not bundle.asset_ids:
-        return []
-    fallback_asset_id = bundle.asset_ids[0]
-    return [
-        {
-            "story_part_id": part.id,
-            "asset_id": bundle.asset_ids[index] if index < len(bundle.asset_ids) else fallback_asset_id,
-        }
-        for index, part in enumerate(parts)
-    ]
-
-
 def _assemble_render_context(job: Job, session: Session) -> dict[str, Any]:
     story = session.get(Story, job.story_id) if job.story_id else None
     if not story:
@@ -97,17 +78,15 @@ def _assemble_render_context(job: Job, session: Session) -> dict[str, Any]:
         .order_by(StoryPart.index)
     ).all()
     bundle = session.get(AssetBundle, job.asset_bundle_id) if job.asset_bundle_id else None
-    part_asset_map: list[dict[str, int]] = _normalize_part_asset_map(bundle, parts) if bundle else []
-    asset_ids = list(dict.fromkeys([row["asset_id"] for row in part_asset_map] or (bundle.asset_ids if bundle else [])))
-    assets = session.exec(select(Asset).where(Asset.id.in_(asset_ids))).all() if asset_ids else []
-    assets_by_id = {asset.id: asset for asset in assets}
+    asset_refs = bundle_asset_refs(bundle, session) if bundle else []
+    part_asset_map = bundle_part_asset_map(bundle, parts, session) if bundle else []
     selected_asset = None
     story_part = None
     if job.story_part_id:
         story_part = session.get(StoryPart, job.story_part_id)
         selected_row = next((row for row in part_asset_map if row["story_part_id"] == job.story_part_id), None)
         if selected_row:
-            selected_asset = assets_by_id.get(selected_row["asset_id"])
+            selected_asset = selected_row["asset"]
 
     compilation = session.get(Compilation, job.compilation_id) if job.compilation_id else None
     prior_artifacts = session.exec(
@@ -124,6 +103,7 @@ def _assemble_render_context(job: Job, session: Session) -> dict[str, Any]:
     bundle_data = None
     if bundle:
         bundle_data = bundle.model_dump()
+        bundle_data["asset_refs"] = asset_refs
         bundle_data["part_asset_map"] = part_asset_map
 
     return {
@@ -134,8 +114,8 @@ def _assemble_render_context(job: Job, session: Session) -> dict[str, Any]:
         "script_version": script_version.model_dump() if script_version else None,
         "render_preset": render_preset.model_dump() if render_preset else None,
         "asset_bundle": bundle_data,
-        "assets": [asset.model_dump() for asset in assets],
-        "selected_asset": selected_asset.model_dump() if selected_asset else None,
+        "assets": asset_refs,
+        "selected_asset": selected_asset,
         "parts": [part.model_dump() for part in parts],
         "artifacts": [artifact.model_dump() for artifact in prior_artifacts],
         "releases": [release.model_dump() for release in releases],

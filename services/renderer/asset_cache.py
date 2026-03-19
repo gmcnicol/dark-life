@@ -1,8 +1,7 @@
-"""Remote asset caching and materialization for renderer jobs."""
+"""Materialize the selected media reference into the current job directory."""
 
 from __future__ import annotations
 
-import hashlib
 import mimetypes
 import os
 from dataclasses import dataclass
@@ -12,7 +11,6 @@ from urllib.parse import urlparse
 import requests
 
 from shared.config import settings
-from shared.logging import log_info
 
 
 @dataclass(frozen=True)
@@ -35,21 +33,10 @@ def _suffix_for_asset(asset: dict, response: requests.Response | None = None) ->
     return ".mp4" if asset.get("type") == "video" else ".jpg"
 
 
-def _cache_key(asset: dict) -> str:
-    provider = asset.get("provider") or "remote"
-    provider_id = asset.get("provider_id")
-    if provider_id:
-        return f"{provider}-{provider_id}"
-    remote_url = asset.get("remote_url")
-    if not remote_url:
-        return f"{provider}-local"
-    digest = hashlib.sha256(str(remote_url).encode("utf-8")).hexdigest()
-    return f"{provider}-{digest}"
-
-
 def materialize_asset(
     asset: dict,
     *,
+    output_dir: Path | None = None,
     session: requests.sessions.Session | None = None,
 ) -> MaterializedAsset:
     local_path = asset.get("local_path")
@@ -63,31 +50,14 @@ def materialize_asset(
     if not remote_url:
         raise FileNotFoundError("Asset missing remote_url")
 
+    dest_dir = output_dir or Path(settings.TMP_DIR)
+    dest_dir.mkdir(parents=True, exist_ok=True)
     sess = session or requests
-    cache_root = Path(settings.REMOTE_ASSET_CACHE_DIR)
-    cache_root.mkdir(parents=True, exist_ok=True)
-    provider = asset.get("provider") or "remote"
-    provider_dir = cache_root / provider
-    provider_dir.mkdir(parents=True, exist_ok=True)
-
-    provisional = provider_dir / _cache_key(asset)
-    existing = next(provider_dir.glob(f"{provisional.name}.*"), None)
-    if existing and existing.exists():
-        log_info(
-            "asset_cache_hit",
-            asset_id=asset.get("id"),
-            provider=provider,
-            path=str(existing),
-        )
-        return MaterializedAsset(path=existing, cache_hit=True)
-
     resp = sess.get(remote_url, timeout=60, stream=True)
     resp.raise_for_status()
     suffix = _suffix_for_asset(asset, response=resp)
-    target = provider_dir / f"{provisional.name}{suffix}"
-    if target.exists():
-        return MaterializedAsset(path=target, cache_hit=True)
-
+    stem = asset.get("key") or asset.get("provider_id") or "selected-media"
+    target = dest_dir / f"{stem}{suffix}"
     tmp = target.with_suffix(f"{target.suffix}.tmp")
     with tmp.open("wb") as handle:
         for chunk in resp.iter_content(chunk_size=1024 * 1024):
@@ -96,12 +66,6 @@ def materialize_asset(
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(tmp, target)
-    log_info(
-        "asset_cache_miss",
-        asset_id=asset.get("id"),
-        provider=provider,
-        path=str(target),
-    )
     return MaterializedAsset(path=target, cache_hit=False)
 
 

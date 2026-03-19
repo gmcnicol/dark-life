@@ -15,6 +15,7 @@ from shared.config import settings
 from shared.workflow import PublishApprovalStatus, PublishJobStatus, ReleaseStatus, RenderVariant, StoryStatus, can_transition_story
 
 from .db import get_session
+from .media_refs import bundle_asset_refs, bundle_part_asset_map, media_key, normalize_asset_refs, normalize_media_ref, ordered_part_asset_map
 from .models import (
     Asset,
     AssetBundle,
@@ -30,6 +31,8 @@ from .models import (
     RenderPresetRead,
     ScriptVersion,
     ScriptVersionRead,
+    MediaReference,
+    PartMediaSelection,
     Story,
     StoryCreate,
     StoryPart,
@@ -68,40 +71,40 @@ MIN_PART_SECONDS = 30
 MAX_PART_SECONDS = 75
 SENTENCE_RE = re.compile(r"[^.!?]+[.!?](?:\s+|$)")
 IMAGE_SEARCH_BASE_TERMS = (
-    "eerie",
-    "dark",
-    "moody",
+    "uncanny",
+    "liminal",
+    "subtle",
 )
 IMAGE_SEARCH_THEME_CUES = (
     {
         "name": "isolation",
         "triggers": ("alone", "lonely", "empty", "isolated", "missing", "silent", "quiet", "vacant", "remote", "stranded"),
-        "terms": ("lonely", "mist", "silhouette"),
+        "terms": ("vacant", "stillness", "silhouette"),
     },
     {
         "name": "decay",
         "triggers": ("abandoned", "rotting", "derelict", "ruin", "decay", "forgotten", "vacant", "neglected"),
-        "terms": ("abandoned", "derelict", "shadows"),
+        "terms": ("abandoned", "vacant", "threshold"),
     },
     {
         "name": "confinement",
         "triggers": ("hallway", "corridor", "basement", "attic", "door", "window", "apartment", "house", "room", "stair"),
-        "terms": ("shadowy", "hallway", "doorway"),
+        "terms": ("hallway", "doorway", "empty"),
     },
     {
         "name": "wilderness",
         "triggers": ("forest", "woods", "wood", "cabin", "lake", "road", "trail", "field", "swamp", "fog"),
-        "terms": ("forest", "mist", "silhouette"),
+        "terms": ("forest", "mist", "stillness"),
     },
     {
         "name": "night",
         "triggers": ("night", "midnight", "moon", "storm", "rain", "fog", "dark"),
-        "terms": ("night", "fog", "moonlit"),
+        "terms": ("night", "fog", "quiet"),
     },
     {
         "name": "presence",
         "triggers": ("shadow", "watching", "watched", "stare", "whisper", "breath", "footstep", "knock", "scratch", "voice"),
-        "terms": ("ominous", "shadows", "silhouette"),
+        "terms": ("uncanny", "stillness", "figure"),
     },
 )
 
@@ -115,8 +118,8 @@ class PartInput(BaseModel):
 
 class AssetBundleCreate(BaseModel):
     name: str = "Primary bundle"
-    asset_ids: list[int]
-    part_asset_map: list[dict[str, int]] | None = None
+    asset_refs: list[MediaReference]
+    part_asset_map: list[PartMediaSelection] | None = None
     variant: str = RenderVariant.SHORT.value
     music_policy: str = "first"
     music_track: str | None = None
@@ -170,11 +173,13 @@ def _extract_image_keywords(story: Story) -> str:
         if score:
             scored_cues.append((score, index, cue["terms"]))
 
-    keywords = list(IMAGE_SEARCH_BASE_TERMS)
+    keywords: list[str] = []
     if scored_cues:
         for _score, _index, terms in sorted(scored_cues, key=lambda item: (-item[0], item[1]))[:2]:
             keywords.extend(terms)
+        keywords.extend(IMAGE_SEARCH_BASE_TERMS)
     else:
+        keywords.extend(IMAGE_SEARCH_BASE_TERMS)
         keywords.extend(("shadows", "mist", "silhouette"))
 
     return " ".join(list(dict.fromkeys(keywords))[:7])
@@ -216,6 +221,13 @@ def _fetch_pixabay_assets(keywords: str) -> list[dict[str, Any]]:
             continue
         assets.append(
             {
+                "key": media_key(
+                    {
+                        "provider": "pixabay",
+                        "provider_id": str(hit.get("id")),
+                        "remote_url": remote_url,
+                    }
+                ),
                 "remote_url": remote_url,
                 "provider": "pixabay",
                 "provider_id": str(hit.get("id")),
@@ -234,116 +246,107 @@ def _fetch_and_store_story_images(session: Session, story: Story) -> list[Asset]
     keywords = _extract_image_keywords(story)
     fetched = _fetch_pixabay_assets(keywords)
     existing = _list_existing_story_images(session, story.id)
-    existing_urls = {asset.remote_url for asset in existing if asset.remote_url}
-    created: list[Asset] = []
-    next_rank = len(existing)
+    existing_by_url = {asset.remote_url: asset for asset in existing if asset.remote_url}
+    fetched_assets: list[Asset] = []
+    touched_assets: list[Asset] = []
 
     for result in fetched:
         remote_url = result["remote_url"]
-        if remote_url in existing_urls:
-            continue
-        asset = Asset(
-            story_id=story.id,
-            type="image",
-            remote_url=remote_url,
-            source="remote",
-            provider=result.get("provider"),
-            provider_id=result.get("provider_id"),
-            selected=False,
-            rank=next_rank,
-            orientation=result.get("orientation"),
-            tags=result.get("tags"),
-            width=result.get("width"),
-            height=result.get("height"),
-            attribution=result.get("attribution"),
-        )
-        session.add(asset)
-        created.append(asset)
-        existing_urls.add(remote_url)
-        next_rank += 1
+        asset = existing_by_url.pop(remote_url, None)
+        if asset is None:
+            asset = Asset(
+                story_id=story.id,
+                type="image",
+                remote_url=remote_url,
+                source="remote",
+                provider=result.get("provider"),
+                provider_id=result.get("provider_id"),
+                selected=False,
+                orientation=result.get("orientation"),
+                tags=result.get("tags"),
+                width=result.get("width"),
+                height=result.get("height"),
+                attribution=result.get("attribution"),
+            )
+        else:
+            asset.provider = result.get("provider")
+            asset.provider_id = result.get("provider_id")
+            asset.orientation = result.get("orientation")
+            asset.tags = result.get("tags")
+            asset.width = result.get("width")
+            asset.height = result.get("height")
+            asset.attribution = result.get("attribution")
+        fetched_assets.append(asset)
+        touched_assets.append(asset)
 
-    if created:
+    for rank, asset in enumerate(fetched_assets):
+        asset.rank = rank
+        session.add(asset)
+
+    for rank, asset in enumerate(existing_by_url.values(), start=len(fetched_assets)):
+        asset.rank = rank
+        session.add(asset)
+
+    if touched_assets:
         session.commit()
-        for asset in created:
+        for asset in touched_assets:
             session.refresh(asset)
 
-    return _list_existing_story_images(session, story.id)
+    return fetched_assets
 
 
 def _estimate_seconds(text: str) -> int:
     return max(1, int(round(len(text) / CHARS_PER_SECOND)))
 
 
-def _ordered_part_asset_map(parts: list[StoryPart], asset_ids: list[int]) -> list[dict[str, int]]:
-    if not parts or not asset_ids:
-        return []
-    mapped: list[dict[str, int]] = []
-    fallback_asset_id = asset_ids[0]
-    for index, part in enumerate(parts):
-        asset_id = asset_ids[index] if index < len(asset_ids) else fallback_asset_id
-        mapped.append({"story_part_id": part.id, "asset_id": asset_id})
-    return mapped
-
-
-def _normalize_part_asset_map(raw_map: list[dict[str, int]] | None) -> list[dict[str, int]]:
-    if not raw_map:
-        return []
-    normalized: list[dict[str, int]] = []
-    for row in raw_map:
-        story_part_id = int(row["story_part_id"])
-        asset_id = int(row["asset_id"])
-        normalized.append({"story_part_id": story_part_id, "asset_id": asset_id})
-    return normalized
-
-
 def _resolve_bundle_part_asset_map(bundle: AssetBundle, parts: list[StoryPart]) -> list[dict[str, int]]:
-    part_asset_map = _normalize_part_asset_map(bundle.part_asset_map)
-    if part_asset_map:
-        return part_asset_map
-    return _ordered_part_asset_map(parts, bundle.asset_ids)
+    return bundle_part_asset_map(bundle, parts)
 
 
 def _validate_bundle_payload(
     story: Story,
     parts: list[StoryPart],
-    assets: list[Asset],
     *,
-    asset_ids: list[int],
-    part_asset_map: list[dict[str, int]] | None,
-) -> tuple[list[int], list[dict[str, int]]]:
-    asset_ids = [int(asset_id) for asset_id in asset_ids]
-    assets_by_id = {asset.id: asset for asset in assets}
-    if len(assets_by_id) != len(asset_ids):
-        raise HTTPException(status_code=400, detail="Unknown asset id in bundle")
-    if any(asset.story_id not in {None, story.id} for asset in assets):
-        raise HTTPException(status_code=400, detail="Asset does not belong to story")
-
+    asset_refs: list[dict[str, Any]],
+    part_asset_map: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_refs = normalize_asset_refs(asset_refs)
+    if not normalized_refs:
+        raise HTTPException(status_code=400, detail="Bundle must include at least one asset")
+    refs_by_key = {asset["key"]: asset for asset in normalized_refs}
     parts_by_id = {part.id: part for part in parts}
-    normalized_map = _normalize_part_asset_map(part_asset_map)
+    normalized_map: list[dict[str, Any]] = []
+    for row in part_asset_map or []:
+        if isinstance(row, PartMediaSelection):
+            story_part_id = int(row.story_part_id)
+            asset = normalize_media_ref(row.asset.model_dump())
+        else:
+            story_part_id = int(row["story_part_id"])
+            asset = normalize_media_ref(row["asset"])
+        normalized_map.append({"story_part_id": story_part_id, "asset": asset})
     if not normalized_map:
-        normalized_map = _ordered_part_asset_map(parts, asset_ids)
+        normalized_map = ordered_part_asset_map(parts, normalized_refs)
     if parts and not normalized_map:
         raise HTTPException(status_code=400, detail="Bundle must assign an asset to each part")
 
     seen_parts: set[int] = set()
     for row in normalized_map:
         story_part_id = row["story_part_id"]
-        asset_id = row["asset_id"]
+        asset = row["asset"]
         if story_part_id in seen_parts:
             raise HTTPException(status_code=400, detail="Duplicate story part in part_asset_map")
         if story_part_id not in parts_by_id:
             raise HTTPException(status_code=400, detail="Unknown story part in part_asset_map")
-        if asset_id not in assets_by_id:
-            raise HTTPException(status_code=400, detail="Unknown asset id in part_asset_map")
+        if asset["key"] not in refs_by_key:
+            raise HTTPException(status_code=400, detail="Unknown asset in part_asset_map")
         seen_parts.add(story_part_id)
 
     if len(seen_parts) != len(parts_by_id):
         raise HTTPException(status_code=400, detail="Bundle must cover every story part")
 
-    normalized_asset_ids = list(dict.fromkeys([row["asset_id"] for row in normalized_map]))
-    if not normalized_asset_ids:
-        raise HTTPException(status_code=400, detail="Bundle must include at least one asset")
-    return normalized_asset_ids, normalized_map
+    normalized_asset_refs = list(dict.fromkeys([row["asset"]["key"] for row in normalized_map]))
+    ordered_refs = [refs_by_key[key] for key in normalized_asset_refs]
+    return ordered_refs, normalized_map
 
 
 def _sentence_spans(text: str) -> list[tuple[str, int, int]]:
@@ -561,19 +564,16 @@ def list_asset_library(
     ]
 
 
-@router.post("/stories/{story_id}/assets/index", response_model=list[AssetRead])
-def index_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[Asset]:
+@router.post("/stories/{story_id}/assets/index", response_model=list[MediaReference])
+def index_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
     story = _get_story(session, story_id)
-    return _fetch_and_store_story_images(session, story)
+    return normalize_asset_refs(_fetch_pixabay_assets(_extract_image_keywords(story)))
 
 
-@router.get("/stories/{story_id}/assets", response_model=list[AssetRead])
-def list_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[Asset]:
+@router.get("/stories/{story_id}/assets", response_model=list[MediaReference])
+def list_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
     story = _get_story(session, story_id)
-    existing = _list_existing_story_images(session, story_id)
-    if existing:
-        return existing
-    return _fetch_and_store_story_images(session, story)
+    return normalize_asset_refs(_fetch_pixabay_assets(_extract_image_keywords(story)))
 
 
 @router.get("/stories/{story_id}/asset-bundles", response_model=list[AssetBundleRead])
@@ -590,7 +590,8 @@ def list_asset_bundles(story_id: int, session: Session = Depends(get_session)) -
         .order_by(AssetBundle.id.desc())
     ).all()
     for bundle in bundles:
-        bundle.part_asset_map = _resolve_bundle_part_asset_map(bundle, parts)
+        bundle.asset_refs = bundle_asset_refs(bundle, session)
+        bundle.part_asset_map = bundle_part_asset_map(bundle, parts, session)
     return bundles
 
 
@@ -606,22 +607,18 @@ def create_bundle(
         .where(StoryPart.story_id == story_id)
         .order_by(StoryPart.index)
     ).all()
-    requested_asset_ids = bundle_in.asset_ids or [
-        int(row["asset_id"]) for row in (bundle_in.part_asset_map or [])
-    ]
-    assets = session.exec(select(Asset).where(Asset.id.in_(requested_asset_ids))).all()
-    asset_ids, part_asset_map = _validate_bundle_payload(
+    part_asset_rows = [row.model_dump() if isinstance(row, PartMediaSelection) else row for row in (bundle_in.part_asset_map or [])]
+    asset_refs, part_asset_map = _validate_bundle_payload(
         story,
         parts,
-        assets,
-        asset_ids=requested_asset_ids,
-        part_asset_map=bundle_in.part_asset_map,
+        asset_refs=[asset.model_dump() if isinstance(asset, MediaReference) else asset for asset in bundle_in.asset_refs],
+        part_asset_map=part_asset_rows,
     )
     bundle = create_asset_bundle(
         session,
         story,
         name=bundle_in.name,
-        asset_ids=asset_ids,
+        asset_refs=asset_refs,
         part_asset_map=part_asset_map,
         variant=bundle_in.variant,
         music_policy=bundle_in.music_policy,
@@ -663,7 +660,8 @@ def create_releases(
         .where(StoryPart.story_id == story_id)
         .order_by(StoryPart.index)
     ).all()
-    bundle.part_asset_map = _resolve_bundle_part_asset_map(bundle, parts)
+    bundle.asset_refs = bundle_asset_refs(bundle, session)
+    bundle.part_asset_map = bundle_part_asset_map(bundle, parts, session)
     if parts and len(bundle.part_asset_map) != len(parts):
         raise HTTPException(status_code=400, detail="Asset bundle must cover every story part")
     releases, _jobs = create_short_releases(
@@ -908,7 +906,8 @@ def story_overview(story_id: int, session: Session = Depends(get_session)) -> di
         .order_by(AssetBundle.id.desc())
     ).all()
     for bundle in bundles:
-        bundle.part_asset_map = _resolve_bundle_part_asset_map(bundle, parts)
+        bundle.asset_refs = bundle_asset_refs(bundle, session)
+        bundle.part_asset_map = bundle_part_asset_map(bundle, parts, session)
     releases = session.exec(
         select(Release).where(Release.story_id == story_id).order_by(Release.id.desc())
     ).all()

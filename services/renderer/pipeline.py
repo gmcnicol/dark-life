@@ -60,7 +60,7 @@ def render_short_job(
             policy = f"named:{bundle['music_track']}"
         selected_music = music.select_track(policy, required=False)
 
-    materialized = materialize_asset(asset, session=session)
+    materialized = materialize_asset(asset, output_dir=job_dir, session=session)
     render_input = RenderInput(
         job_id=job_id,
         story_id=story["id"],
@@ -96,7 +96,7 @@ def render_short_job(
         **plan.metadata,
         "preset_slug": preset["slug"],
         "part_index": part["index"],
-        "selected_asset_id": asset["id"],
+        "selected_asset_id": asset.get("key") or asset.get("provider_id") or asset.get("remote_url"),
         "selected_asset_provider": asset.get("provider"),
         "selected_music_track": selected_music.name if selected_music else None,
         "tts_cache_hit": voice_result.cache_hit,

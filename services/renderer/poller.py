@@ -57,7 +57,6 @@ def _validate_runtime() -> None:
         log_info("config_warning", field="ELEVENLABS_VOICE_ID", message="TTS voice is unset")
     Path(settings.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     Path(settings.TMP_DIR).mkdir(parents=True, exist_ok=True)
-    Path(settings.REMOTE_ASSET_CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
 
 def poll_jobs(session: requests.sessions.Session | None = None) -> list[dict]:
@@ -102,7 +101,7 @@ def render_job(job: dict, session: requests.sessions.Session | None = None) -> d
         job_id=job["id"],
         story_id=context["story"]["id"],
         part_id=(context.get("story_part") or {}).get("id"),
-        asset_id=(context.get("selected_asset") or {}).get("id"),
+        asset_id=(context.get("selected_asset") or {}).get("key"),
     )
     return render_pipeline_job(context, session=session)
 

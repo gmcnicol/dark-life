@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import Boolean, Column, DateTime, JSON, String, Text, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
@@ -163,6 +163,26 @@ class AssetRead(AssetBase):
     updated_at: datetime | None = None
 
 
+class MediaReference(SQLModel):
+    key: str
+    type: str = Field(default=AssetKind.VIDEO.value)
+    remote_url: str | None = None
+    local_path: str | None = None
+    provider: Optional[str] = None
+    provider_id: Optional[str] = None
+    duration_ms: int | None = None
+    width: int | None = None
+    height: int | None = None
+    orientation: str | None = None
+    attribution: str | None = None
+    tags: list[str] | None = None
+
+
+class PartMediaSelection(SQLModel):
+    story_part_id: int
+    asset: MediaReference
+
+
 class AssetUpdate(SQLModel):
     selected: Optional[bool] = None
     rank: Optional[int] = None
@@ -174,8 +194,8 @@ class AssetBundleBase(SQLModel):
     story_id: int = Field(foreign_key="story.id")
     name: str
     variant: str = Field(default=RenderVariant.SHORT.value)
-    asset_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
-    part_asset_map: list[dict[str, int]] = Field(default_factory=list, sa_column=Column(JSON))
+    asset_refs: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column("asset_ids", JSON))
+    part_asset_map: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     music_policy: str = "first"
     music_track: str | None = None
 
@@ -413,6 +433,8 @@ __all__ = [
     "AssetBundleRead",
     "AssetRead",
     "AssetUpdate",
+    "MediaReference",
+    "PartMediaSelection",
     "Compilation",
     "CompilationRead",
     "Job",

@@ -1,4 +1,5 @@
 import re
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -58,6 +59,26 @@ def test_mix_ducking(tmp_path, monkeypatch):
 
     music.mix(voice, music_src, out)
     assert out.exists()
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=channels,channel_layout",
+            "-of",
+            "json",
+            str(out),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+    stream = json.loads(probe.stdout)["streams"][0]
+    assert stream["channels"] == 2
 
     def max_vol(
         path: Path,

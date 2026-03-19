@@ -7,7 +7,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from apps.api.db import get_session
 import apps.api.main as main
 import apps.api.render_jobs as render_jobs
-from apps.api.models import Asset, AssetBundle, Job, PublishJob, Release, RenderPreset, Story, StoryPart
+from apps.api.models import AssetBundle, Job, PublishJob, Release, RenderPreset, Story, StoryPart
 from apps.api.pipeline import ensure_default_presets
 from shared.workflow import PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus
 
@@ -44,16 +44,13 @@ def _create_job(session: Session, *, auto_schedule_release: bool = False) -> int
     story = Story(title="Story", status="queued")
     session.add(story)
     session.flush()
-    asset = Asset(
-        story_id=story.id,
-        type="image",
-        remote_url="https://example.com/fog.jpg",
-        provider="pixabay",
-        provider_id="123",
-        source="remote",
-    )
-    session.add(asset)
-    session.flush()
+    asset = {
+        "key": "pixabay:123",
+        "type": "image",
+        "remote_url": "https://example.com/fog.jpg",
+        "provider": "pixabay",
+        "provider_id": "123",
+    }
     preset = session.exec(select(RenderPreset)).first()
     if preset is None:
         preset = RenderPreset(
@@ -69,7 +66,7 @@ def _create_job(session: Session, *, auto_schedule_release: bool = False) -> int
     bundle = AssetBundle(
         story_id=story.id,
         name="Primary",
-        asset_ids=[asset.id],
+        asset_refs=[asset],
         part_asset_map=[],
     )
     session.add(bundle)
@@ -87,7 +84,7 @@ def _create_job(session: Session, *, auto_schedule_release: bool = False) -> int
     )
     session.add(part)
     session.flush()
-    bundle.part_asset_map = [{"story_part_id": part.id, "asset_id": asset.id}]
+    bundle.part_asset_map = [{"story_part_id": part.id, "asset": asset}]
     session.add(bundle)
     job = Job(
         story_id=story.id,

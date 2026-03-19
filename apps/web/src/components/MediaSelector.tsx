@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Asset, Story, StoryPart } from "@/lib/stories";
+import type { MediaRef, Story, StoryPart } from "@/lib/stories";
 import { createAssetBundle, indexStoryAssets } from "@/lib/stories";
 import { canManageMedia, STATUS_LABELS } from "@/lib/workflow";
 import { ActionButton, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
@@ -14,41 +14,48 @@ export default function MediaSelector({
 }: {
   story: Story;
   parts: StoryPart[];
-  assets: Asset[];
+  assets: MediaRef[];
 }) {
   const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<number[]>(() =>
-    assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.id),
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [catalogAssets, setCatalogAssets] = useState<MediaRef[]>(assets);
+  const [selected, setSelected] = useState<string[]>(() =>
+    assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.key),
   );
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [fetchNotice, setFetchNotice] = useState<string | null>(null);
   const canSave = canManageMedia(story.status);
 
   useEffect(() => {
+    setCatalogAssets(assets);
+  }, [assets]);
+
+  useEffect(() => {
     setSelected((current) => {
-      if (assets.length === 0) {
+      if (catalogAssets.length === 0) {
         return [];
       }
-      const validCurrent = current.filter((id) => assets.some((asset) => asset.id === id));
+      const validCurrent = current.filter((key) => catalogAssets.some((asset) => asset.key === key));
       if (validCurrent.length > 0) {
         return validCurrent;
       }
-      return assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.id);
+      return catalogAssets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.key);
     });
-  }, [assets, parts.length]);
+  }, [catalogAssets, parts.length]);
 
   const previewAssets = useMemo(
-    () => selected.map((id) => assets.find((asset) => asset.id === id)).filter(Boolean) as Asset[],
-    [assets, selected],
+    () => selected.map((key) => catalogAssets.find((asset) => asset.key === key)).filter(Boolean) as MediaRef[],
+    [catalogAssets, selected],
   );
 
-  const toggleAsset = (id: number) => {
+  const toggleAsset = (key: string) => {
     if (!canSave) {
       return;
     }
     setSelected((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
     );
   };
 
@@ -56,24 +63,24 @@ export default function MediaSelector({
     if (!canSave) {
       return;
     }
-    setSelected(assets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.id));
+    setSelected(catalogAssets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.key));
   };
 
   const saveBundle = () => {
     startTransition(async () => {
       try {
         setError(null);
-        const fallbackAssetId = selected[0];
-        if (fallbackAssetId === undefined) {
+        const fallbackAsset = previewAssets[0];
+        if (fallbackAsset === undefined) {
           throw new Error("Select at least one asset before saving the bundle");
         }
         const partAssetMap = parts.map((part, index) => ({
           story_part_id: part.id,
-          asset_id: selected[index] ?? fallbackAssetId,
+          asset: previewAssets[index] ?? fallbackAsset,
         }));
         await createAssetBundle(story.id, {
           name: "Primary bundle",
-          asset_ids: selected,
+          asset_refs: previewAssets,
           part_asset_map: partAssetMap,
         });
         await queryClient.invalidateQueries();
@@ -87,8 +94,19 @@ export default function MediaSelector({
     startRefreshTransition(async () => {
       try {
         setError(null);
-        await indexStoryAssets(story.id);
-        await queryClient.invalidateQueries({ queryKey: ["story-assets", story.id] });
+        setFetchNotice(null);
+        const latestAssets = await indexStoryAssets(story.id);
+        setCatalogAssets(latestAssets);
+        setSelected(latestAssets.slice(0, Math.max(parts.length, 1)).map((asset) => asset.key));
+        setFetchNotice(
+          latestAssets.length > 0
+            ? `Showing ${latestAssets.length} latest Pixabay matches for this story.`
+            : "No current Pixabay matches for this story.",
+        );
+        queryClient.setQueryData(["story-assets", story.id], latestAssets);
+        requestAnimationFrame(() => {
+          gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to fetch remote matches");
       }
@@ -126,6 +144,7 @@ export default function MediaSelector({
           </ActionButton>
         </div>
         {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+        {fetchNotice ? <StatusBadge tone="neutral">{fetchNotice}</StatusBadge> : null}
         {!canSave ? (
           <p className="text-sm text-[var(--text-soft)]">
             Media selection unlocks after approval and freezes once renders have been queued.
@@ -134,8 +153,8 @@ export default function MediaSelector({
       </Panel>
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {assets.length === 0 ? (
+        <div ref={gridRef} className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+          {catalogAssets.length === 0 ? (
             <div className="md:col-span-2 2xl:col-span-3">
               <EmptyState
                 title="No remote media matches yet"
@@ -147,16 +166,16 @@ export default function MediaSelector({
                 }
               />
             </div>
-          ) : assets.map((asset) => {
-            const selectedAsset = selected.includes(asset.id);
+          ) : catalogAssets.map((asset) => {
+            const selectedAsset = selected.includes(asset.key);
             const previewSrc = asset.remote_url || asset.local_path || "";
             return (
               <button
-                key={asset.id}
+                key={asset.key}
                 type="button"
-                onClick={() => toggleAsset(asset.id)}
+                onClick={() => toggleAsset(asset.key)}
                 disabled={!canSave}
-                data-testid={selectedAsset ? `catalog-img-${asset.id}` : undefined}
+                data-testid={selectedAsset ? `catalog-img-${asset.key}` : undefined}
                 className={`relative overflow-hidden rounded-[1.6rem] border p-3 text-left transition ${
                   selectedAsset
                     ? "border-cyan-300/50 bg-cyan-300/[0.12] shadow-[0_18px_40px_rgba(34,211,238,0.14)]"

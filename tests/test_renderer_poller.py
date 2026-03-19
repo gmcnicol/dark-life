@@ -36,7 +36,7 @@ def test_process_job_happy_path(monkeypatch):
                     "job": {"id": 1, "kind": "render_part"},
                     "story": {"id": 10},
                     "story_part": {"id": 20},
-                    "selected_asset": {"id": 30},
+                    "selected_asset": {"key": "pixabay:30"},
                 }
             )
         raise AssertionError(url)
@@ -78,7 +78,7 @@ def test_abort_on_lease_loss(monkeypatch):
                     "job": {"id": 2, "kind": "render_part"},
                     "story": {"id": 10},
                     "story_part": {"id": 20},
-                    "selected_asset": {"id": 30},
+                    "selected_asset": {"key": "pixabay:30"},
                 }
             )
         raise AssertionError(url)
@@ -120,7 +120,7 @@ def test_process_job_records_stderr_snippet(monkeypatch):
                     "job": {"id": 3, "kind": "render_part"},
                     "story": {"id": 10},
                     "story_part": {"id": 20},
-                    "selected_asset": {"id": 30},
+                    "selected_asset": {"key": "pixabay:30"},
                 }
             )
         raise AssertionError(url)

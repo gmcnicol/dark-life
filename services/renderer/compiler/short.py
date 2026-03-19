@@ -38,9 +38,11 @@ def compile_short_render(render_input: RenderInput) -> RenderPlan:
         ducking_db = abs(float(render_input.preset.get("ducking_db", settings.DUCKING_DB)))
         threshold = 0.000976563
         filter_complex = (
-            f"[1:a]volume={music_gain_db}dB[m];"
-            f"[m][0:a]sidechaincompress=threshold={threshold}:ratio=20:attack=5:release=50:makeup={ducking_db}[d];"
-            f"[0:a][d]amix=inputs=2:duration=first:dropout_transition=2,volume=-1dB[out]"
+            "[0:a]pan=stereo|c0=c0|c1=c0[vo];"
+            f"[1:a]aformat=channel_layouts=stereo,volume={music_gain_db}dB[m];"
+            f"[m][vo]sidechaincompress=threshold={threshold}:ratio=20:attack=5:release=50:makeup={ducking_db}[d];"
+            "[vo][d]amix=inputs=2:duration=first:dropout_transition=2,volume=-1dB,"
+            "aformat=channel_layouts=stereo[out]"
         )
         commands.append(
             CommandSpec(
@@ -128,6 +130,8 @@ def compile_short_render(render_input: RenderInput) -> RenderPlan:
                 "copy",
                 "-c:a",
                 "aac",
+                "-ac",
+                "2",
                 "-shortest",
                 str(mux_output),
             ],
@@ -166,7 +170,7 @@ def compile_short_render(render_input: RenderInput) -> RenderPlan:
             "compiler": "renderer.short.v1",
             "command_labels": [command.label for command in commands],
             "burn_subtitles": render_input.burn_subtitles,
-            "selected_asset_id": render_input.asset.get("id"),
+            "selected_asset_id": render_input.asset.get("key") or render_input.asset.get("id"),
         },
     )
 

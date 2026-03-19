@@ -43,7 +43,11 @@ def test_compile_short_render_with_music_and_burn(tmp_path):
     plan = compile_short_render(_render_input(tmp_path, music=True, burn=True))
     labels = [command.label for command in plan.commands]
     assert labels == ["mix_audio", "render_background", "mux_av", "burn_subtitles"]
-    assert any("sidechaincompress" in " ".join(command.args) for command in plan.commands)
+    mix_audio = plan.commands[0]
+    mux_av = plan.commands[2]
+    assert "sidechaincompress" in " ".join(mix_audio.args)
+    assert "pan=stereo|c0=c0|c1=c0" in " ".join(mix_audio.args)
+    assert mux_av.args[mux_av.args.index("-ac") + 1] == "2"
     assert plan.artifacts.video_path == tmp_path / "output" / "video.mp4"
 
 
@@ -52,5 +56,7 @@ def test_compile_short_render_video_without_music(tmp_path):
     labels = [command.label for command in plan.commands]
     assert labels == ["render_background", "mux_av"]
     render_background = plan.commands[0]
+    mux_av = plan.commands[1]
     assert "-stream_loop" in render_background.args
+    assert mux_av.args[mux_av.args.index("-ac") + 1] == "2"
     assert plan.metadata["selected_asset_id"] == 42

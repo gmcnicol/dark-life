@@ -50,7 +50,7 @@ def test_generate_script_and_parts(client):
     assert len(parts.json()) >= 1
 
 
-def test_extract_image_keywords_biases_search_to_eerie_feel():
+def test_extract_image_keywords_biases_search_to_story_mood():
     story = Story(
         title="The Woman At My Window",
         body_md="Every night the house felt empty and silent, like something was watching me from outside.",
@@ -58,11 +58,12 @@ def test_extract_image_keywords_biases_search_to_eerie_feel():
 
     keywords = stories_api._extract_image_keywords(story).split()
 
-    assert keywords[:3] == ["eerie", "dark", "moody"]
+    assert keywords[:3] == ["vacant", "stillness", "silhouette"]
+    assert "uncanny" in keywords
     assert "window" not in keywords
     assert "woman" not in keywords
     assert "house" not in keywords
-    assert "shadows" in keywords or "silhouette" in keywords
+    assert "silhouette" in keywords
 
 
 def test_story_asset_index_uses_mood_first_pixabay_query(client, monkeypatch: pytest.MonkeyPatch):
@@ -99,10 +100,145 @@ def test_story_asset_index_uses_mood_first_pixabay_query(client, monkeypatch: py
 
     assert res.status_code == 200
     keywords = captured["keywords"].split()
-    assert keywords[:3] == ["eerie", "dark", "moody"]
+    assert keywords[:3] == ["vacant", "stillness", "silhouette"]
+    assert "uncanny" in keywords
     assert "knife" not in keywords
     assert "kitchen" not in keywords
     assert "silent" not in keywords
+
+
+def test_story_asset_index_moves_latest_fetch_results_to_top(client, monkeypatch: pytest.MonkeyPatch):
+    client, _engine = client
+    fetch_round = {"count": 0}
+
+    def fake_fetch(_keywords: str):
+        fetch_round["count"] += 1
+        if fetch_round["count"] == 1:
+            return [
+                {
+                    "remote_url": "https://example.com/old-1.jpg",
+                    "provider": "pixabay",
+                    "provider_id": "asset-1",
+                    "type": "image",
+                    "orientation": "portrait",
+                    "tags": ["vacant"],
+                    "width": 1080,
+                    "height": 1920,
+                    "attribution": "tester",
+                },
+                {
+                    "remote_url": "https://example.com/old-2.jpg",
+                    "provider": "pixabay",
+                    "provider_id": "asset-2",
+                    "type": "image",
+                    "orientation": "portrait",
+                    "tags": ["hallway"],
+                    "width": 1080,
+                    "height": 1920,
+                    "attribution": "tester",
+                },
+            ]
+        return [
+            {
+                "remote_url": "https://example.com/new-top.jpg",
+                "provider": "pixabay",
+                "provider_id": "asset-3",
+                "type": "image",
+                "orientation": "portrait",
+                "tags": ["stillness"],
+                "width": 1080,
+                "height": 1920,
+                "attribution": "tester",
+            },
+            {
+                "remote_url": "https://example.com/old-1.jpg",
+                "provider": "pixabay",
+                "provider_id": "asset-1",
+                "type": "image",
+                "orientation": "portrait",
+                "tags": ["vacant"],
+                "width": 1080,
+                "height": 1920,
+                "attribution": "tester",
+            },
+        ]
+
+    monkeypatch.setattr(stories_api, "_fetch_pixabay_assets", fake_fetch)
+
+    story = client.post(
+        "/stories",
+        json={
+            "title": "Latest assets",
+            "body_md": "A hallway felt empty and too quiet at night.",
+        },
+    ).json()
+
+    first = client.post(f"/stories/{story['id']}/assets/index")
+    assert first.status_code == 200
+    assert [asset["remote_url"] for asset in first.json()] == [
+        "https://example.com/old-1.jpg",
+        "https://example.com/old-2.jpg",
+    ]
+
+    second = client.post(f"/stories/{story['id']}/assets/index")
+    assert second.status_code == 200
+    assert [asset["remote_url"] for asset in second.json()] == [
+        "https://example.com/new-top.jpg",
+        "https://example.com/old-1.jpg",
+    ]
+
+
+def test_story_asset_list_returns_latest_fetch_set(client, monkeypatch: pytest.MonkeyPatch):
+    client, _engine = client
+    fetch_round = {"count": 0}
+
+    def fake_fetch(_keywords: str):
+        fetch_round["count"] += 1
+        if fetch_round["count"] == 1:
+            return [
+                {
+                    "remote_url": "https://example.com/old-1.jpg",
+                    "provider": "pixabay",
+                    "provider_id": "asset-1",
+                    "type": "image",
+                    "orientation": "portrait",
+                    "tags": ["vacant"],
+                    "width": 1080,
+                    "height": 1920,
+                    "attribution": "tester",
+                }
+            ]
+        return [
+            {
+                "remote_url": "https://example.com/new-1.jpg",
+                "provider": "pixabay",
+                "provider_id": "asset-2",
+                "type": "image",
+                "orientation": "portrait",
+                "tags": ["liminal"],
+                "width": 1080,
+                "height": 1920,
+                "attribution": "tester",
+            }
+        ]
+
+    monkeypatch.setattr(stories_api, "_fetch_pixabay_assets", fake_fetch)
+
+    story = client.post(
+        "/stories",
+        json={
+            "title": "Current mood",
+            "body_md": "The room felt vacant and too quiet to trust.",
+        },
+    ).json()
+
+    first = client.post(f"/stories/{story['id']}/assets/index")
+    assert first.status_code == 200
+    assert [asset["remote_url"] for asset in first.json()] == ["https://example.com/old-1.jpg"]
+
+    listed = client.get(f"/stories/{story['id']}/assets")
+    assert listed.status_code == 200
+    assert [asset["remote_url"] for asset in listed.json()] == ["https://example.com/new-1.jpg"]
 
 
 def test_create_bundle_and_release_jobs(client, tmp_path, monkeypatch: pytest.MonkeyPatch):
@@ -142,7 +278,7 @@ def test_create_bundle_and_release_jobs(client, tmp_path, monkeypatch: pytest.Mo
 
     bundle = client.post(
         f"/stories/{story['id']}/asset-bundles",
-        json={"name": "Primary", "asset_ids": [assets[0]["id"]]},
+        json={"name": "Primary", "asset_refs": [assets[0]]},
     )
     assert bundle.status_code == 200
     assert bundle.json()["part_asset_map"]
@@ -228,7 +364,7 @@ def test_short_release_rejects_inactive_platform(client, monkeypatch: pytest.Mon
     assets = client.post(f"/stories/{story['id']}/assets/index").json()
     bundle = client.post(
         f"/stories/{story['id']}/asset-bundles",
-        json={"name": "Primary", "asset_ids": [assets[0]["id"]]},
+        json={"name": "Primary", "asset_refs": [assets[0]]},
     ).json()
     res = client.post(
         f"/stories/{story['id']}/releases",
@@ -296,7 +432,7 @@ def test_short_release_schedule_follows_existing_queue(client, monkeypatch: pyte
     assets = client.post(f"/stories/{story['id']}/assets/index").json()
     bundle = client.post(
         f"/stories/{story['id']}/asset-bundles",
-        json={"name": "Primary", "asset_ids": [assets[0]["id"]]},
+        json={"name": "Primary", "asset_refs": [assets[0]]},
     ).json()
     releases = client.post(
         f"/stories/{story['id']}/releases",
@@ -347,8 +483,8 @@ def test_bundle_rejects_incomplete_part_asset_map(client, monkeypatch: pytest.Mo
         f"/stories/{story['id']}/asset-bundles",
         json={
             "name": "Primary",
-            "asset_ids": [assets[0]["id"]],
-            "part_asset_map": [{"story_part_id": parts[0]["id"], "asset_id": assets[0]["id"]}],
+            "asset_refs": [assets[0]],
+            "part_asset_map": [{"story_part_id": parts[0]["id"], "asset": assets[0]}],
         },
     )
     assert res.status_code == 400

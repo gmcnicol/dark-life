@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from .db import get_session
-from .models import Asset, Job, Story, StoryPart
+from .media_refs import bundle_asset_refs
+from .models import AssetBundle, Job, Story, StoryPart
 
 router = APIRouter(prefix="/render", tags=["render"])
 
@@ -32,10 +33,9 @@ def next_series(session: Session = Depends(get_session)) -> dict[str, Any]:
     ).all()
     if not jobs:
         return {}
-    payload = job.payload or {}
-    asset_ids = payload.get("asset_ids") or []
-    assets = session.exec(select(Asset).where(Asset.id.in_(asset_ids))).all()
     story = session.get(Story, story_id)
+    bundle = session.get(AssetBundle, job.asset_bundle_id) if job.asset_bundle_id else None
+    assets = bundle_asset_refs(bundle, session) if bundle else []
     parts: list[dict[str, Any]] = []
     for j in jobs:
         p_index = (j.payload or {}).get("part_index")
@@ -49,7 +49,7 @@ def next_series(session: Session = Depends(get_session)) -> dict[str, Any]:
     session.commit()
     return {
         "story": {"id": story.id, "title": story.title} if story else None,
-        "assets": [{"id": a.id, "remote_url": a.remote_url} for a in assets],
+        "assets": assets,
         "parts": parts,
     }
 

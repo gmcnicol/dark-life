@@ -66,9 +66,11 @@ def mix(voice: Path, music: Path | None, out_path: Path) -> Path:
 
     threshold = 0.000976563
     filter_complex = (
-        f"[1:a]volume={settings.MUSIC_GAIN_DB}dB[m];"
-        f"[m][0:a]sidechaincompress=threshold={threshold}:ratio=20:attack=5:release=50[d];"
-        f"[0:a][d]amix=inputs=2:duration=first:dropout_transition=2,volume=-1dB[out]"
+        "[0:a]pan=stereo|c0=c0|c1=c0[vo];"
+        f"[1:a]aformat=channel_layouts=stereo,volume={settings.MUSIC_GAIN_DB}dB[m];"
+        f"[m][vo]sidechaincompress=threshold={threshold}:ratio=20:attack=5:release=50[d];"
+        "[vo][d]amix=inputs=2:duration=first:dropout_transition=2,volume=-1dB,"
+        "aformat=channel_layouts=stereo[out]"
     )
 
     cmd = [
