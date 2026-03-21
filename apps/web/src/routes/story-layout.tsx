@@ -7,6 +7,7 @@ import { LoadingState, PageHeader, StatusBadge } from "@/components/ui-surfaces"
 
 const WORKSPACE_TABS = [
   { key: "review", label: "Review", description: "Script gate" },
+  { key: "refinement", label: "Lab", description: "Experiments" },
   { key: "split", label: "Parts", description: "Timing and segmentation" },
   { key: "media", label: "Media", description: "Asset bundle" },
   { key: "queue", label: "Queue", description: "Render setup" },

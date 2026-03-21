@@ -105,10 +105,14 @@ export default function ReviewBar({
         </ActionButton>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-5">
         <Link to={`/story/${story.id}/split`} className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]">
           <p className="text-sm font-semibold text-white">Edit parts</p>
           <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Timing and sections</p>
+        </Link>
+        <Link to={`/story/${story.id}/refinement`} className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]">
+          <p className="text-sm font-semibold text-white">Open refinement lab</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Variants and scoring</p>
         </Link>
         <Link to={`/story/${story.id}/media`} className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]">
           <p className="text-sm font-semibold text-white">Choose media</p>

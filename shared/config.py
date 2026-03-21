@@ -27,6 +27,25 @@ TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/renderer"))
 REMOTE_ASSET_CACHE_DIR = Path(
     os.getenv("REMOTE_ASSET_CACHE_DIR", str(Path(CONTENT_DIR) / "cache" / "remote-assets"))
 )
+DEFAULT_REDDIT_SUBREDDITS = (
+    "Odd_directions",
+    "shortscarystories",
+    "nosleep",
+    "stayawake",
+    "Ruleshorror",
+    "libraryofshadows",
+    "JustNotRight",
+    "TheCrypticCompendium",
+    "SignalHorrorFiction",
+    "scarystories",
+    "SLEEPSPELL",
+    "TwoSentenceHorror",
+)
+DEFAULT_REDDIT_SUBREDDITS_CSV = ",".join(DEFAULT_REDDIT_SUBREDDITS)
+
+
+def parse_csv_list(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 class Settings(BaseSettings):
@@ -78,6 +97,10 @@ class Settings(BaseSettings):
         )
     REDDIT_USER_AGENT: str = Field(
         default="darklife/1.0", description="User agent for Reddit API"
+    )
+    REDDIT_DEFAULT_SUBREDDITS: str = Field(
+        default=DEFAULT_REDDIT_SUBREDDITS_CSV,
+        description="Comma-separated default subreddit list, in polling order",
     )
     API_BASE_URL: str = Field(
         default="http://api:8000",
@@ -185,6 +208,34 @@ class Settings(BaseSettings):
         default="gpt-4.1-mini",
         description="OpenAI model used for script adaptation",
     )
+    OPENAI_CRITIC_MODEL: str = Field(
+        default="gpt-4.1-mini",
+        description="OpenAI model used for script critique",
+    )
+    OPENAI_ANALYST_MODEL: str = Field(
+        default="gpt-4.1-mini",
+        description="OpenAI model used for experiment analysis",
+    )
+    REFINEMENT_POLL_INTERVAL_SEC: int = Field(
+        default=10,
+        description="Polling interval for refinement jobs",
+    )
+    REFINEMENT_MAX_CONCURRENT: int = Field(
+        default=1,
+        description="Maximum concurrent refinement jobs",
+    )
+    REFINEMENT_LEASE_SECONDS: int = Field(
+        default=180,
+        description="Lease duration when claiming refinement jobs",
+    )
+    REFINEMENT_DEFAULT_BATCH_SIZE: int = Field(
+        default=20,
+        description="Default number of candidates generated per refinement batch",
+    )
+    REFINEMENT_DEFAULT_SHORTLIST_SIZE: int = Field(
+        default=3,
+        description="Default number of shortlisted scripts per batch",
+    )
     PEXELS_API_KEY: str = Field(
         default="",
         description="Pexels API key for remote image search",
@@ -281,8 +332,11 @@ __all__ = [
     "Settings",
     "settings",
     "CONTENT_DIR",
+    "DEFAULT_REDDIT_SUBREDDITS",
+    "DEFAULT_REDDIT_SUBREDDITS_CSV",
     "MUSIC_DIR",
     "OUTPUT_DIR",
     "TMP_DIR",
     "REMOTE_ASSET_CACHE_DIR",
+    "parse_csv_list",
 ]

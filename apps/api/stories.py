@@ -21,6 +21,8 @@ from .models import (
     AssetBundle,
     AssetBundleRead,
     AssetRead,
+    ScriptBatch,
+    ScriptBatchRead,
     Compilation,
     CompilationRead,
     Release,
@@ -60,6 +62,7 @@ from .pipeline import (
     generate_release_metadata,
     upsert_script,
 )
+from .script_refinement import run_compat_script_generation
 
 router = APIRouter(tags=["stories"])
 
@@ -448,7 +451,7 @@ def list_scripts(story_id: int, session: Session = Depends(get_session)) -> list
 @router.post("/stories/{story_id}/script", response_model=ScriptVersionRead)
 def generate_script(story_id: int, session: Session = Depends(get_session)) -> ScriptVersion:
     story = _get_story(session, story_id)
-    script = upsert_script(session, story)
+    script = run_compat_script_generation(session, story)
     session.commit()
     session.refresh(script)
     return script
@@ -456,12 +459,11 @@ def generate_script(story_id: int, session: Session = Depends(get_session)) -> S
 
 @router.get("/stories/{story_id}/parts", response_model=list[StoryPartRead])
 def list_parts(story_id: int, session: Session = Depends(get_session)) -> list[StoryPart]:
-    _get_story(session, story_id)
-    return session.exec(
-        select(StoryPart)
-        .where(StoryPart.story_id == story_id)
-        .order_by(StoryPart.index)
-    ).all()
+    story = _get_story(session, story_id)
+    query = select(StoryPart).where(StoryPart.story_id == story_id)
+    if story.active_script_version_id:
+        query = query.where(StoryPart.script_version_id == story.active_script_version_id)
+    return session.exec(query.order_by(StoryPart.index)).all()
 
 
 @router.put("/stories/{story_id}/parts", response_model=list[StoryPartRead])
@@ -475,8 +477,8 @@ def replace_parts(
     if story.active_script_version_id:
         script = session.get(ScriptVersion, story.active_script_version_id)
     if not script:
-        script = upsert_script(session, story)
-    for existing in session.exec(select(StoryPart).where(StoryPart.story_id == story_id)).all():
+        script = run_compat_script_generation(session, story)
+    for existing in session.exec(select(StoryPart).where(StoryPart.script_version_id == script.id)).all():
         session.delete(existing)
     part_models: list[StoryPart] = []
     if all(part.start_char is not None and part.end_char is not None for part in parts):
@@ -581,7 +583,10 @@ def list_asset_bundles(story_id: int, session: Session = Depends(get_session)) -
     _get_story(session, story_id)
     parts = session.exec(
         select(StoryPart)
-        .where(StoryPart.story_id == story_id)
+        .where(
+            StoryPart.story_id == story_id,
+            StoryPart.script_version_id == story.active_script_version_id,
+        )
         .order_by(StoryPart.index)
     ).all()
     bundles = session.exec(
@@ -670,6 +675,7 @@ def create_releases(
         platforms=platforms,
         preset=preset,
         asset_bundle=bundle,
+        script_version=session.get(ScriptVersion, story.active_script_version_id) if story.active_script_version_id else None,
     )
     session.commit()
     return _serialize_releases(session, releases)
@@ -897,8 +903,21 @@ def story_overview(story_id: int, session: Session = Depends(get_session)) -> di
     script = session.get(ScriptVersion, story.active_script_version_id) if story.active_script_version_id else None
     parts = session.exec(
         select(StoryPart)
-        .where(StoryPart.story_id == story_id)
+        .where(
+            StoryPart.story_id == story_id,
+            StoryPart.script_version_id == story.active_script_version_id,
+        )
         .order_by(StoryPart.index)
+    ).all()
+    script_versions = session.exec(
+        select(ScriptVersion)
+        .where(ScriptVersion.story_id == story_id)
+        .order_by(ScriptVersion.id.desc())
+    ).all()
+    script_batches = session.exec(
+        select(ScriptBatch)
+        .where(ScriptBatch.story_id == story_id)
+        .order_by(ScriptBatch.id.desc())
     ).all()
     bundles = session.exec(
         select(AssetBundle)
@@ -914,6 +933,8 @@ def story_overview(story_id: int, session: Session = Depends(get_session)) -> di
     return {
         "story": StoryRead.model_validate(story).model_dump(),
         "active_script": ScriptVersionRead.model_validate(script).model_dump() if script else None,
+        "script_versions": [ScriptVersionRead.model_validate(item).model_dump() for item in script_versions],
+        "script_batches": [ScriptBatchRead.model_validate(item).model_dump() for item in script_batches],
         "parts": [StoryPartRead.model_validate(part).model_dump() for part in parts],
         "asset_bundles": [AssetBundleRead.model_validate(bundle).model_dump() for bundle in bundles],
         "releases": [release_read(session, release).model_dump() for release in releases],

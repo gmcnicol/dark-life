@@ -43,6 +43,13 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `SUBTITLES_BURN_IN` – burn subtitles into video when `true`
 - `OPENAI_API_KEY` – OpenAI API key for Whisper API
 - `OPENAI_SCRIPT_MODEL` – OpenAI model used for script adaptation
+- `OPENAI_CRITIC_MODEL` – OpenAI model used for script critique
+- `OPENAI_ANALYST_MODEL` – OpenAI model used for batch analysis
+- `REFINEMENT_POLL_INTERVAL_SEC` – polling interval for refinement jobs
+- `REFINEMENT_MAX_CONCURRENT` – maximum concurrent refinement jobs
+- `REFINEMENT_LEASE_SECONDS` – lease duration for refinement claims
+- `REFINEMENT_DEFAULT_BATCH_SIZE` – default candidate batch size
+- `REFINEMENT_DEFAULT_SHORTLIST_SIZE` – default shortlist size
 
 ## Web (Next.js)
 - `ADMIN_API_TOKEN` – server-only token for admin API calls; normally set to the same value as `API_AUTH_TOKEN`
@@ -51,7 +58,8 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `REDDIT_CLIENT_ID` – Reddit API client id
 - `REDDIT_CLIENT_SECRET` – Reddit API client secret
 - `REDDIT_USER_AGENT` – Reddit API user agent
-- `REDDIT_DEFAULT_SUBREDDITS` – comma-separated default subreddit list
+- `REDDIT_DEFAULT_SUBREDDITS` – comma-separated default subreddit list. Default order:
+  `Odd_directions,shortscarystories,nosleep,stayawake,Ruleshorror,libraryofshadows,JustNotRight,TheCrypticCompendium,SignalHorrorFiction,scarystories,SLEEPSPELL,TwoSentenceHorror`
 - `BACKFILL_USE_CLOUDSEARCH` – use cloudsearch windows during backfill
 - `BACKFILL_MAX_PAGES` – maximum pages fetched during backfill
 - `DEBUG_INGEST_SAMPLE` – log sample titles during ingest when `true`

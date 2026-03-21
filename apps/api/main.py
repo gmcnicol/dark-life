@@ -13,6 +13,8 @@ from time import monotonic
 
 from .db import Session, engine, init_db
 from .pipeline import ensure_default_presets
+from .refinement import ensure_default_prompt_versions
+from .script_refinement import router as script_refinement_router
 from .stories import router as stories_router
 from .jobs import router as jobs_router
 from .reddit_admin import router as reddit_admin_router
@@ -33,6 +35,7 @@ async def lifespan(_app: FastAPI):
     init_db()
     with Session(engine) as session:
         ensure_default_presets(session)
+        ensure_default_prompt_versions(session)
     ready = True
     yield
 
@@ -74,6 +77,7 @@ class LogRequestsMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(LogRequestsMiddleware)
 app.include_router(stories_router)
+app.include_router(script_refinement_router)
 app.include_router(jobs_router)
 app.include_router(reddit_admin_router)
 app.include_router(admin_stories_router)

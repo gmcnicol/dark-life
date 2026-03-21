@@ -1,11 +1,11 @@
 """Command line entry points for Reddit ingestion."""
 
 from typing import List
-import os
 
 import typer
 
 from .incremental import fetch_incremental
+from shared.config import parse_csv_list, settings
 
 app = typer.Typer(add_completion=False, help="Reddit ingestion commands")
 
@@ -15,9 +15,8 @@ def main() -> None:
     """Reddit ingestion commands."""
 
 
-def _subreddits_from_env() -> List[str]:
-    value = os.getenv("REDDIT_DEFAULT_SUBREDDITS", "")
-    subs = [s.strip() for s in value.split(",") if s.strip()]
+def _default_subreddits() -> List[str]:
+    subs = parse_csv_list(settings.REDDIT_DEFAULT_SUBREDDITS)
     if not subs:
         typer.echo(
             "REDDIT_DEFAULT_SUBREDDITS env var must specify subreddits", err=True
@@ -30,7 +29,7 @@ def _subreddits_from_env() -> List[str]:
 def incremental() -> None:
     """Fetch new posts for default subreddits."""
 
-    subs = _subreddits_from_env()
+    subs = _default_subreddits()
     for sub in subs:
         typer.echo(f"Fetching new posts for {sub}...")
         inserted = fetch_incremental(sub)

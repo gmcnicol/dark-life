@@ -429,7 +429,7 @@ def upsert_script(session: Session, story: Story) -> ScriptVersion:
 
 
 def replace_parts_from_script(session: Session, story: Story, script: ScriptVersion) -> list[StoryPart]:
-    for part in session.exec(select(StoryPart).where(StoryPart.story_id == story.id)).all():
+    for part in session.exec(select(StoryPart).where(StoryPart.script_version_id == script.id)).all():
         session.delete(part)
     composite = " ".join(filter(None, [script.hook, script.narration_text, script.outro])).strip()
     part_specs = _script_part_specs(script)
@@ -632,10 +632,15 @@ def create_short_releases(
     platforms: list[str],
     preset: RenderPreset,
     asset_bundle: AssetBundle,
+    script_version: ScriptVersion | None = None,
 ) -> tuple[list[Release], list[Job]]:
+    target_script_version_id = script_version.id if script_version else story.active_script_version_id
     parts = session.exec(
         select(StoryPart)
-        .where(StoryPart.story_id == story.id)
+        .where(
+            StoryPart.story_id == story.id,
+            StoryPart.script_version_id == target_script_version_id,
+        )
         .order_by(StoryPart.index)
     ).all()
     publish_slots = short_release_schedule(session, count=len(parts))
@@ -653,6 +658,7 @@ def create_short_releases(
             release = Release(
                 story_id=story.id,
                 story_part_id=part.id,
+                script_version_id=part.script_version_id,
                 platform=platform,
                 variant=RenderVariant.SHORT.value,
                 title=str(metadata["title"]),
@@ -676,7 +682,7 @@ def create_short_releases(
             kind="render_part",
             variant=RenderVariant.SHORT.value,
             status=JobStatus.QUEUED.value,
-            correlation_id=f"story-{story.id}-part-{part.index}",
+            correlation_id=f"story-{story.id}-script-{part.script_version_id or 'active'}-part-{part.index}",
             payload={
                 "story_id": story.id,
                 "story_part_id": part.id,
@@ -741,6 +747,7 @@ def release_for_artifact(
     story_id: int,
     story_part_id: int | None,
     compilation_id: int | None,
+    script_version_id: int | None = None,
 ) -> Iterable[Release]:
     query = select(Release).where(Release.story_id == story_id)
     if story_part_id is None:
@@ -751,4 +758,8 @@ def release_for_artifact(
         query = query.where(Release.compilation_id.is_(None))
     else:
         query = query.where(Release.compilation_id == compilation_id)
+    if script_version_id is None:
+        query = query.where(Release.script_version_id.is_(None))
+    else:
+        query = query.where(Release.script_version_id == script_version_id)
     return session.exec(query).all()

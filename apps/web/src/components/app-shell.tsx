@@ -9,6 +9,7 @@ import { StatusBadge } from "./ui-surfaces";
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Overview", kicker: "Studio pulse" },
   { to: "/inbox", label: "Inbox", kicker: "Story triage" },
+  { to: "/experiments", label: "Experiments", kicker: "Learning loop" },
   { to: "/board", label: "Pipeline", kicker: "Stage pressure" },
   { to: "/jobs", label: "Renders", kicker: "Worker queue" },
   { to: "/publish", label: "Publish", kicker: "Approval + delivery" },
@@ -38,6 +39,14 @@ function routeMeta(pathname: string) {
       title: "Stage pressure",
       description:
         "Spot bottlenecks across the editorial-to-render workflow and focus on what is stalled, at risk, or ready to move.",
+    };
+  }
+  if (pathname.startsWith("/experiments")) {
+    return {
+      eyebrow: "Experiment loop",
+      title: "Refinement telemetry",
+      description:
+        "Track active script experiments, analyst reports, and prompt governance without leaving the operator surface.",
     };
   }
   if (pathname.startsWith("/jobs")) {

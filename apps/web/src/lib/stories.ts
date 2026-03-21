@@ -20,12 +20,25 @@ export interface Story {
 export interface ScriptVersion {
   id: number;
   story_id: number;
+  batch_id?: number | null;
+  concept_id?: number | null;
   source_text: string;
   hook: string;
   narration_text: string;
   outro: string;
   model_name: string;
   prompt_version: string;
+  template_version?: string;
+  critic_version?: string;
+  selection_policy_version?: string;
+  temperature?: number;
+  selection_state?: string;
+  critic_scores?: Record<string, unknown> | null;
+  performance_metrics?: Record<string, unknown> | null;
+  derived_metrics?: Record<string, unknown> | null;
+  generation_metadata?: Record<string, unknown> | null;
+  critic_rank?: number | null;
+  performance_rank?: number | null;
   is_active: boolean;
 }
 
@@ -39,6 +52,14 @@ export interface StoryPart {
   script_text: string;
   est_seconds: number;
   approved: boolean;
+  episode_type?: string;
+  hook?: string;
+  lines?: string[] | null;
+  loop_line?: string;
+  features?: Record<string, unknown> | null;
+  critic_scores?: Record<string, unknown> | null;
+  performance_metrics?: Record<string, unknown> | null;
+  derived_metrics?: Record<string, unknown> | null;
 }
 
 export interface MediaRef {
@@ -89,6 +110,7 @@ export interface Release {
   id: number;
   story_id: number;
   story_part_id?: number | null;
+  script_version_id?: number | null;
   compilation_id?: number | null;
   render_artifact_id?: number | null;
   platform: string;
@@ -148,10 +170,84 @@ export interface Job {
 export interface StoryOverview {
   story: Story;
   active_script: ScriptVersion | null;
+  script_versions: ScriptVersion[];
+  script_batches: ScriptBatch[];
   parts: StoryPart[];
   asset_bundles: AssetBundle[];
   releases: Release[];
   artifacts: RenderArtifact[];
+}
+
+export interface StoryConcept {
+  id: number;
+  story_id: number;
+  concept_key: string;
+  concept_label: string;
+  anomaly_type: string;
+  object_focus?: string | null;
+  specificity: string;
+}
+
+export interface ScriptBatch {
+  id: number;
+  story_id: number;
+  concept_id?: number | null;
+  status: string;
+  candidate_count: number;
+  shortlisted_count: number;
+  template_version: string;
+  prompt_version: string;
+  critic_version: string;
+  selection_policy_version: string;
+  analyst_version: string;
+  model_name: string;
+  temperature: number;
+  config?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
+  error_message?: string | null;
+}
+
+export interface ScriptBatchDetail {
+  batch: ScriptBatch;
+  concept: StoryConcept | null;
+  candidates: Array<ScriptVersion & { parts: StoryPart[] }>;
+  report: AnalysisReport | null;
+}
+
+export interface MetricsSnapshot {
+  id: number;
+  release_id?: number | null;
+  story_id: number;
+  script_version_id: number;
+  story_part_id?: number | null;
+  window_hours: number;
+  source: string;
+  metrics: Record<string, unknown>;
+  derived_metrics?: Record<string, unknown> | null;
+}
+
+export interface AnalysisReport {
+  id: number;
+  batch_id?: number | null;
+  story_id: number;
+  concept_id?: number | null;
+  analyst_version: string;
+  status: string;
+  summary: string;
+  insights?: Record<string, unknown> | null;
+  recommendations?: Record<string, unknown> | null;
+  prompt_proposals?: Record<string, unknown> | null;
+  metrics_window_hours: number;
+}
+
+export interface PromptVersion {
+  id: number;
+  kind: string;
+  version_label: string;
+  status: string;
+  body: string;
+  config?: Record<string, unknown> | null;
+  notes?: string | null;
 }
 
 export async function listStories(params: { status?: string; page?: number; limit?: number } = {}): Promise<Story[]> {
@@ -187,6 +283,108 @@ export async function updateStoryStatus(id: number, status: StoryStatus): Promis
 
 export async function generateScript(id: number): Promise<ScriptVersion> {
   return apiFetch<ScriptVersion>(`/stories/${id}/script`, { method: "POST" });
+}
+
+export async function createScriptBatch(
+  id: number,
+  payload: { candidate_count?: number; shortlisted_count?: number; temperature?: number } = {},
+): Promise<ScriptBatchDetail> {
+  return apiFetch<ScriptBatchDetail>(`/stories/${id}/script-batches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listScriptBatches(id: number): Promise<ScriptBatch[]> {
+  return apiFetch<ScriptBatch[]>(`/stories/${id}/script-batches`);
+}
+
+export async function getScriptBatch(id: number): Promise<ScriptBatchDetail> {
+  return apiFetch<ScriptBatchDetail>(`/script-batches/${id}`);
+}
+
+export async function selectScriptVersion(
+  id: number,
+  payload: { state: string },
+): Promise<ScriptVersion> {
+  return apiFetch<ScriptVersion>(`/script-versions/${id}/select`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function activateScriptVersion(id: number): Promise<ScriptVersion> {
+  return apiFetch<ScriptVersion>(`/script-versions/${id}/activate`, { method: "POST" });
+}
+
+export async function listScriptVersionParts(id: number): Promise<StoryPart[]> {
+  return apiFetch<StoryPart[]>(`/script-versions/${id}/parts`);
+}
+
+export async function createScriptVersionReleases(
+  id: number,
+  payload: { platforms: string[]; preset_slug: string; asset_bundle_id?: number | null },
+): Promise<Release[]> {
+  return apiFetch<Release[]>(`/script-versions/${id}/releases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getScriptVersionMetrics(
+  id: number,
+): Promise<{ script: ScriptVersion; snapshots: MetricsSnapshot[] }> {
+  return apiFetch<{ script: ScriptVersion; snapshots: MetricsSnapshot[] }>(
+    `/script-versions/${id}/metrics`,
+  );
+}
+
+export async function listAnalysisReports(params: {
+  story_id?: number;
+  batch_id?: number;
+} = {}): Promise<AnalysisReport[]> {
+  const search = new URLSearchParams();
+  if (params.story_id) {
+    search.set("story_id", String(params.story_id));
+  }
+  if (params.batch_id) {
+    search.set("batch_id", String(params.batch_id));
+  }
+  const suffix = search.toString();
+  return apiFetch<AnalysisReport[]>(`/analysis-reports${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function listPromptVersions(kind?: string): Promise<PromptVersion[]> {
+  const suffix = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+  return apiFetch<PromptVersion[]>(`/prompt-versions${suffix}`);
+}
+
+export async function createPromptVersion(
+  payload: {
+    kind: string;
+    version_label: string;
+    body: string;
+    config?: Record<string, unknown>;
+    notes?: string;
+    status?: string;
+  },
+): Promise<PromptVersion> {
+  return apiFetch<PromptVersion>("/prompt-versions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function activatePromptVersion(id: number): Promise<PromptVersion> {
+  return apiFetch<PromptVersion>(`/prompt-versions/${id}/activate`, { method: "POST" });
+}
+
+export async function archivePromptVersion(id: number): Promise<PromptVersion> {
+  return apiFetch<PromptVersion>(`/prompt-versions/${id}/archive`, { method: "POST" });
 }
 
 export async function replaceStoryParts(

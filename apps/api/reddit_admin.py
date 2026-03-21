@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from .db import get_session
 from .models import Job
+from shared.config import parse_csv_list, settings
 
 router = APIRouter(prefix="/admin/reddit", tags=["admin-reddit"])
 
@@ -28,8 +29,7 @@ def require_token(authorization: str = Header(...)) -> None:
 
 
 def _default_subreddits() -> List[str]:
-    env = os.getenv("REDDIT_DEFAULT_SUBREDDITS", "")
-    return [s.strip() for s in env.split(",") if s.strip()]
+    return parse_csv_list(settings.REDDIT_DEFAULT_SUBREDDITS)
 
 
 # ---------------------------------------------------------------------------

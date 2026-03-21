@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     REDDIT_CLIENT_ID: Optional[str] = None
     REDDIT_CLIENT_SECRET: Optional[str] = None
     REDDIT_USER_AGENT: str = "darklife/1.0"
-    REDDIT_DEFAULT_SUBREDDITS: str = "nosleep,confession"
+    REDDIT_DEFAULT_SUBREDDITS: str = "Odd_directions,shortscarystories,nosleep,stayawake,Ruleshorror,libraryofshadows,JustNotRight,TheCrypticCompendium,SignalHorrorFiction,scarystories,SLEEPSPELL,TwoSentenceHorror"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

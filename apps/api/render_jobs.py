@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Field, SQLModel, Session, select
 
 from shared.config import settings
@@ -43,7 +44,7 @@ class ClaimRequest(SQLModel):
     lease_seconds: int = DEFAULT_LEASE_SECONDS
 
 
-class RenderJobStatusUpdate(SQLModel):
+class RenderJobStatusUpdate(BaseModel):
     status: str
     artifact_path: str | None = None
     subtitle_path: str | None = None
@@ -53,7 +54,7 @@ class RenderJobStatusUpdate(SQLModel):
     error_class: str | None = None
     error_message: str | None = None
     stderr_snippet: str | None = None
-    details: dict | None = Field(default=None, alias="metadata")
+    metadata: dict | None = None
 
 
 def require_worker_token(authorization: str | None = Header(default=None)) -> None:
@@ -87,6 +88,8 @@ def _assemble_render_context(job: Job, session: Session) -> dict[str, Any]:
         selected_row = next((row for row in part_asset_map if row["story_part_id"] == job.story_part_id), None)
         if selected_row:
             selected_asset = selected_row["asset"]
+        elif story_part and asset_refs:
+            selected_asset = asset_refs[(max(story_part.index, 1) - 1) % len(asset_refs)]
 
     compilation = session.get(Compilation, job.compilation_id) if job.compilation_id else None
     prior_artifacts = session.exec(
@@ -225,12 +228,13 @@ def _upsert_artifact(job: Job, update: RenderJobStatusUpdate, session: Session) 
     artifact = session.exec(
         select(RenderArtifact).where(RenderArtifact.job_id == job.id)
     ).first()
-    metadata = update.details or {}
+    metadata = update.metadata or {}
     if not artifact:
         artifact = RenderArtifact(
             job_id=job.id,
             story_id=job.story_id or 0,
             story_part_id=job.story_part_id,
+            script_version_id=job.script_version_id,
             compilation_id=job.compilation_id,
             variant=job.variant,
             video_path=update.artifact_path,
@@ -247,6 +251,7 @@ def _upsert_artifact(job: Job, update: RenderJobStatusUpdate, session: Session) 
         artifact.bytes = update.bytes
         artifact.duration_ms = update.duration_ms
         artifact.details = metadata
+        artifact.script_version_id = job.script_version_id
     session.add(artifact)
     session.flush()
     return artifact
@@ -269,10 +274,10 @@ def update_render_job_status(
     job.error_class = update.error_class
     job.error_message = update.error_message
     job.stderr_snippet = update.stderr_snippet
-    if update.details or update.artifact_path:
+    if update.metadata or update.artifact_path:
         job.result = {
             **(job.result or {}),
-            **(update.details or {}),
+            **(update.metadata or {}),
         }
         if update.artifact_path is not None:
             job.result["artifact_path"] = update.artifact_path
@@ -294,6 +299,7 @@ def update_render_job_status(
             story_id=job.story_id or 0,
             story_part_id=job.story_part_id,
             compilation_id=job.compilation_id,
+            script_version_id=job.script_version_id,
         ):
             release.render_artifact_id = artifact.id
             release.delivery_mode = delivery_mode_for_platform(release.platform)

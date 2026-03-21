@@ -89,12 +89,25 @@ class StoryUpdate(SQLModel):
 
 class ScriptVersionBase(SQLModel):
     story_id: int = Field(foreign_key="story.id")
+    batch_id: int | None = Field(default=None, foreign_key="scriptbatch.id")
+    concept_id: int | None = Field(default=None, foreign_key="storyconcept.id")
     source_text: str
     hook: str = ""
     narration_text: str
     outro: str = ""
     model_name: str = "rule_based"
     prompt_version: str = "v1"
+    template_version: str = "template_v1"
+    critic_version: str = "critic_v1"
+    selection_policy_version: str = "selection_policy_v1"
+    temperature: float = 1.0
+    selection_state: str = "draft"
+    critic_scores: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    performance_metrics: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    derived_metrics: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    generation_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    critic_rank: int | None = None
+    performance_rank: int | None = None
     is_active: bool = True
 
 
@@ -120,6 +133,16 @@ class StoryPartBase(SQLModel):
     start_char: int = 0
     end_char: int = 0
     approved: bool = False
+    episode_type: str = "entry"
+    hook: str = ""
+    lines: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    loop_line: str = ""
+    features: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    critic_scores: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    performance_metrics: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    derived_metrics: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    critic_rank: int | None = None
+    performance_rank: int | None = None
     notes: str | None = None
 
 
@@ -323,6 +346,7 @@ class RenderArtifactBase(SQLModel):
     job_id: int | None = Field(default=None, foreign_key="jobs.id")
     story_id: int = Field(foreign_key="story.id")
     story_part_id: int | None = Field(default=None, foreign_key="storypart.id")
+    script_version_id: int | None = Field(default=None, foreign_key="scriptversion.id")
     compilation_id: int | None = Field(default=None, foreign_key="compilation.id")
     variant: str = Field(default=RenderVariant.SHORT.value)
     video_path: str
@@ -346,6 +370,7 @@ class RenderArtifactRead(RenderArtifactBase):
 class ReleaseBase(SQLModel):
     story_id: int = Field(foreign_key="story.id")
     story_part_id: int | None = Field(default=None, foreign_key="storypart.id")
+    script_version_id: int | None = Field(default=None, foreign_key="scriptversion.id")
     compilation_id: int | None = Field(default=None, foreign_key="compilation.id")
     render_artifact_id: int | None = Field(default=None, foreign_key="renderartifact.id")
     platform: str
@@ -427,6 +452,121 @@ class Upload(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("story_id", "part_index", "platform"),)
 
 
+class StoryConceptBase(SQLModel):
+    story_id: int = Field(foreign_key="story.id")
+    concept_key: str
+    concept_label: str
+    anomaly_type: str = "unknown"
+    object_focus: str | None = None
+    specificity: str = "mixed"
+    extraction_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    is_active: bool = True
+
+
+class StoryConcept(StoryConceptBase, TimestampedModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class StoryConceptRead(StoryConceptBase):
+    id: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ScriptBatchBase(SQLModel):
+    story_id: int = Field(foreign_key="story.id")
+    concept_id: int | None = Field(default=None, foreign_key="storyconcept.id")
+    status: str = "queued"
+    candidate_count: int = 20
+    shortlisted_count: int = 3
+    template_version: str = "template_v1"
+    prompt_version: str = "gen_prompt_v1"
+    critic_version: str = "critic_v1"
+    selection_policy_version: str = "selection_policy_v1"
+    analyst_version: str = "analyst_v1"
+    model_name: str = "gpt-4.1-mini"
+    temperature: float = 1.0
+    config: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    result: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    error_message: str | None = None
+
+
+class ScriptBatch(ScriptBatchBase, TimestampedModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class ScriptBatchRead(ScriptBatchBase):
+    id: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PromptVersionBase(SQLModel):
+    kind: str
+    version_label: str
+    status: str = "draft"
+    body: str
+    config: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    notes: str | None = None
+
+
+class PromptVersion(PromptVersionBase, TimestampedModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    __table_args__ = (UniqueConstraint("kind", "version_label"),)
+
+
+class PromptVersionRead(PromptVersionBase):
+    id: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class MetricsSnapshotBase(SQLModel):
+    release_id: int | None = Field(default=None, foreign_key="release.id")
+    story_id: int = Field(foreign_key="story.id")
+    script_version_id: int = Field(foreign_key="scriptversion.id")
+    story_part_id: int | None = Field(default=None, foreign_key="storypart.id")
+    window_hours: int
+    source: str = "youtube"
+    metrics: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    derived_metrics: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    captured_at: datetime | None = Field(default_factory=utc_now, sa_column=Column(DateTime(timezone=True)))
+
+
+class MetricsSnapshot(MetricsSnapshotBase, TimestampedModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class MetricsSnapshotRead(MetricsSnapshotBase):
+    id: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class AnalysisReportBase(SQLModel):
+    batch_id: int | None = Field(default=None, foreign_key="scriptbatch.id")
+    story_id: int = Field(foreign_key="story.id")
+    concept_id: int | None = Field(default=None, foreign_key="storyconcept.id")
+    analyst_version: str = "analyst_v1"
+    status: str = "draft"
+    summary: str = ""
+    insights: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    recommendations: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    prompt_proposals: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    metrics_window_hours: int = 72
+
+
+class AnalysisReport(AnalysisReportBase, TimestampedModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class AnalysisReportRead(AnalysisReportBase):
+    id: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 __all__ = [
     "Asset",
     "AssetBundle",
@@ -448,6 +588,16 @@ __all__ = [
     "RenderArtifactRead",
     "RenderPreset",
     "RenderPresetRead",
+    "ScriptBatch",
+    "ScriptBatchRead",
+    "StoryConcept",
+    "StoryConceptRead",
+    "PromptVersion",
+    "PromptVersionRead",
+    "MetricsSnapshot",
+    "MetricsSnapshotRead",
+    "AnalysisReport",
+    "AnalysisReportRead",
     "ScriptVersion",
     "ScriptVersionRead",
     "Story",

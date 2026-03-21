@@ -11,6 +11,8 @@ describe("story typing fixtures", () => {
     const overview: StoryOverview = {
       story: { id: 1, title: "t", status: "scripted" },
       active_script: null,
+      script_versions: [],
+      script_batches: [],
       parts: [],
       asset_bundles: [],
       releases: [],

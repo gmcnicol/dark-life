@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Field, SQLModel, Session, select
 
 from shared.config import settings
@@ -30,7 +31,7 @@ class ClaimRequest(SQLModel):
     lease_seconds: int = DEFAULT_LEASE_SECONDS
 
 
-class PublishJobStatusUpdate(SQLModel):
+class PublishJobStatusUpdate(BaseModel):
     status: str
     platform_video_id: str | None = None
     error_class: str | None = None
@@ -38,7 +39,7 @@ class PublishJobStatusUpdate(SQLModel):
     stderr_snippet: str | None = None
     retryable: bool = False
     release_status_override: str | None = None
-    details: dict | None = Field(default=None, alias="metadata")
+    metadata: dict | None = None
 
 
 def require_worker_token(authorization: str | None = Header(default=None)) -> None:
@@ -163,8 +164,8 @@ def update_publish_job_status(
     job.error_class = update.error_class
     job.error_message = update.error_message
     job.stderr_snippet = update.stderr_snippet
-    if update.details:
-        job.result = {**(job.result or {}), **update.details}
+    if update.metadata:
+        job.result = {**(job.result or {}), **update.metadata}
 
     if update.status == PublishJobStatus.PUBLISHING.value:
         release.status = ReleaseStatus.PUBLISHING.value
@@ -172,7 +173,7 @@ def update_publish_job_status(
     elif update.status == PublishJobStatus.PUBLISHED.value:
         override = update.release_status_override
         release.platform_video_id = update.platform_video_id or release.platform_video_id
-        release.provider_metadata = {**(release.provider_metadata or {}), **(update.details or {})} if update.details else release.provider_metadata
+        release.provider_metadata = {**(release.provider_metadata or {}), **(update.metadata or {})} if update.metadata else release.provider_metadata
         release.last_error = None
         if override == ReleaseStatus.MANUAL_HANDOFF.value:
             release.status = ReleaseStatus.MANUAL_HANDOFF.value
@@ -186,7 +187,7 @@ def update_publish_job_status(
         job.attempts += 1
         release.attempt_count = job.attempts
         release.last_error = update.error_message
-        release.provider_metadata = {**(release.provider_metadata or {}), **(update.details or {})} if update.details else release.provider_metadata
+        release.provider_metadata = {**(release.provider_metadata or {}), **(update.metadata or {})} if update.metadata else release.provider_metadata
         if update.retryable and job.attempts < settings.PUBLISH_RETRY_LIMIT:
             job.status = PublishJobStatus.QUEUED.value
             job.lease_expires_at = None

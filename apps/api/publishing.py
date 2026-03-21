@@ -93,22 +93,28 @@ def resolve_release_artifact(session: Session, release: Release) -> RenderArtifa
     if release.render_artifact_id:
         return session.get(RenderArtifact, release.render_artifact_id)
     if release.story_part_id is not None:
-        return session.exec(
+        query = (
             select(RenderArtifact)
             .where(
                 RenderArtifact.story_id == release.story_id,
                 RenderArtifact.story_part_id == release.story_part_id,
             )
             .order_by(RenderArtifact.id.desc())
-        ).first()
-    return session.exec(
+        )
+        if release.script_version_id is not None:
+            query = query.where(RenderArtifact.script_version_id == release.script_version_id)
+        return session.exec(query).first()
+    query = (
         select(RenderArtifact)
         .where(
             RenderArtifact.story_id == release.story_id,
             RenderArtifact.compilation_id == release.compilation_id,
         )
         .order_by(RenderArtifact.id.desc())
-    ).first()
+    )
+    if release.script_version_id is not None:
+        query = query.where(RenderArtifact.script_version_id == release.script_version_id)
+    return session.exec(query).first()
 
 
 def resolve_publish_job(session: Session, release_id: int) -> PublishJob | None:

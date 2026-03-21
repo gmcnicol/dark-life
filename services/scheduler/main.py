@@ -60,6 +60,16 @@ def run_once(session: requests.sessions.Session | None = None) -> None:
         except Exception as exc:
             log_error("scheduler_weekly_error", error=str(exc))
 
+    try:
+        sess.post(
+            f"{base}/refinement-jobs/maintenance",
+            headers=_headers(),
+            timeout=30,
+        ).raise_for_status()
+        log_info("scheduler_refinement_maintenance")
+    except Exception as exc:
+        log_error("scheduler_refinement_maintenance_error", error=str(exc))
+
 
 def run() -> None:  # pragma: no cover - continuous loop
     log_info("scheduler_start", interval_sec=settings.SCHEDULER_INTERVAL_SEC)

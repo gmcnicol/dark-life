@@ -35,6 +35,7 @@ dependencies = [
 
 [project.scripts]
 render-jobs = "services.renderer.poller:run"
+refinement-jobs = "services.refinement.poller:run"
 upload-videos = "video_uploader.cron_upload:app"
 
 [tool.setuptools]
