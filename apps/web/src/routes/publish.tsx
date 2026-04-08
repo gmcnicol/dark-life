@@ -17,6 +17,17 @@ function platformLabel(platform: string): string {
   return platform;
 }
 
+function telemetryTimestampLabel(updatedAt: number): string {
+  if (!updatedAt) {
+    return "Awaiting sync";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(updatedAt);
+}
+
 export default function PublishRoute() {
   const releasesQuery = useQuery({
     queryKey: ["release-queue"],
@@ -94,16 +105,19 @@ export default function PublishRoute() {
           label="Queue depth"
           value={releasesQuery.isLoading ? "…" : metrics.queueDepth}
           detail="Releases currently active in review, schedule, publish, or manual handoff lanes for the selected destination."
+          timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}
         />
         <MetricCard
           label="Awaiting review"
           value={releasesQuery.isLoading ? "…" : metrics.awaitingReview}
           detail="Items in this platform view waiting on immediate upload or a schedule."
+          timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}
         />
         <MetricCard
           label="Manual handoff"
           value={releasesQuery.isLoading ? "…" : metrics.manualHandoff}
           detail="Supervised posts in this platform view that still need a destination id."
+          timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}
         />
       </section>
       {releasesQuery.isLoading ? (

@@ -4,7 +4,7 @@ import type {
   RenderVariant,
   StoryStatus,
 } from "@dark-life/shared-types";
-import { apiFetch } from "./api";
+import { adminFetch, apiFetch } from "./api";
 
 export interface Story {
   id: number;
@@ -250,6 +250,29 @@ export interface PromptVersion {
   notes?: string | null;
 }
 
+export interface RedditIngestJob {
+  id: number;
+  subreddit: string;
+  kind: string;
+  status: string;
+}
+
+export interface RedditIngestResult {
+  subreddit: string;
+  inserted: number;
+}
+
+export interface RedditIngestResponse {
+  results: RedditIngestResult[];
+  total_inserted: number;
+}
+
+export interface PublishPlatformSettings {
+  available_platforms: string[];
+  active_platforms: string[];
+  weekly_supported_platforms: string[];
+}
+
 export async function listStories(params: { status?: string; page?: number; limit?: number } = {}): Promise<Story[]> {
   const searchParams = new URLSearchParams();
   if (params.status) {
@@ -387,6 +410,30 @@ export async function archivePromptVersion(id: number): Promise<PromptVersion> {
   return apiFetch<PromptVersion>(`/prompt-versions/${id}/archive`, { method: "POST" });
 }
 
+export async function enqueueRedditIncremental(
+  payload: { subreddits?: string[] } = {},
+): Promise<RedditIngestResponse> {
+  return adminFetch<RedditIngestResponse>("/api/admin/reddit/incremental", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getPublishPlatformSettings(): Promise<PublishPlatformSettings> {
+  return adminFetch<PublishPlatformSettings>("/api/admin/settings/publish-platforms");
+}
+
+export async function updatePublishPlatformSettings(
+  payload: { active_platforms: string[] },
+): Promise<PublishPlatformSettings> {
+  return adminFetch<PublishPlatformSettings>("/api/admin/settings/publish-platforms", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function replaceStoryParts(
   id: number,
   parts: Array<{ body_md: string; approved: boolean }>,
@@ -508,5 +555,11 @@ export async function completeManualPublish(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function clearRelease(releaseId: number): Promise<Release> {
+  return apiFetch<Release>(`/releases/${releaseId}/clear`, {
+    method: "POST",
   });
 }

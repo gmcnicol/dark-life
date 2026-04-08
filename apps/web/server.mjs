@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleAdminProxy, isAdminProxyRequest } from "./server/admin-proxy.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
@@ -79,6 +80,10 @@ async function proxyApi(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    if (isAdminProxyRequest(url.pathname)) {
+      await handleAdminProxy(req, res, { apiBase });
+      return;
+    }
     if (url.pathname.startsWith("/api/") || url.pathname === "/api") {
       await proxyApi(req, res);
       return;

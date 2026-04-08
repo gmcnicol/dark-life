@@ -155,6 +155,10 @@ class Settings(BaseSettings):
     )
 
     # ElevenLabs TTS configuration
+    TTS_PROVIDER: str = Field(
+        default="elevenlabs",
+        description="TTS provider to use (elevenlabs or xtts_local)",
+    )
     ELEVENLABS_API_KEY: str = Field(
         default="",
         description="ElevenLabs authentication key",
@@ -182,6 +186,50 @@ class Settings(BaseSettings):
     TTS_SPEAKING_SPEED: float = Field(
         default=1.0,
         description="Speaking speed multiplier",
+    )
+    XTTS_MODEL_DIR: Path | None = Field(
+        default=None,
+        description="Preferred XTTS artifact directory containing config/checkpoints/vocab/speaker files",
+    )
+    XTTS_CHECKPOINT_GLOB: str = Field(
+        default="best_model*.pth",
+        description="Glob used to auto-select the newest XTTS checkpoint inside XTTS_MODEL_DIR",
+    )
+    XTTS_WORKSPACE_DIR: Path | None = Field(
+        default=None,
+        description="Legacy XTTS workspace path retained for compatibility with older local setups",
+    )
+    XTTS_RUN_DIR: Path | None = Field(
+        default=None,
+        description="Legacy XTTS run directory; XTTS_MODEL_DIR is preferred",
+    )
+    XTTS_CHECKPOINT_PATH: Path | None = Field(
+        default=None,
+        description="Optional explicit XTTS checkpoint path overriding XTTS_RUN_DIR/best_model.pth",
+    )
+    XTTS_CONFIG_PATH: Path | None = Field(
+        default=None,
+        description="Optional explicit XTTS config path overriding XTTS_RUN_DIR/config.json",
+    )
+    XTTS_VOCAB_PATH: Path | None = Field(
+        default=None,
+        description="Optional explicit XTTS vocab path overriding derived defaults",
+    )
+    XTTS_SPEAKER_FILE_PATH: Path | None = Field(
+        default=None,
+        description="Optional explicit XTTS speakers_xtts.pth path overriding XTTS_RUN_DIR/speakers_xtts.pth",
+    )
+    XTTS_SPEAKER_WAV: Path | None = Field(
+        default=None,
+        description="Reference speaker wav passed to XTTS inference",
+    )
+    XTTS_LANGUAGE: str = Field(
+        default="en",
+        description="Language passed to XTTS inference",
+    )
+    XTTS_DEVICE: str = Field(
+        default="cpu",
+        description="Device hint used by the XTTS helper (cpu or mps)",
     )
 
     # Whisper ASR and subtitle configuration
@@ -251,6 +299,10 @@ class Settings(BaseSettings):
     SCHEDULER_ENABLE_REDDIT: bool = Field(
         default=True,
         description="Whether the scheduler should enqueue reddit incremental jobs",
+    )
+    SCHEDULER_ENABLE_APPROVED_SHORTS: bool = Field(
+        default=False,
+        description="Whether the scheduler should auto-schedule approved stories into short render jobs",
     )
     SCHEDULER_ENABLE_WEEKLY: bool = Field(
         default=True,

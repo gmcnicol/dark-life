@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import EnqueueDialog from "@/components/EnqueueDialog";
 import { LoadingState } from "@/components/ui-surfaces";
-import { getStoryOverview, listRenderPresets } from "@/lib/stories";
+import { getPublishPlatformSettings, getStoryOverview, listRenderPresets } from "@/lib/stories";
 
 export default function StoryQueueRoute() {
   const params = useParams();
@@ -16,8 +16,19 @@ export default function StoryQueueRoute() {
     queryKey: ["render-presets"],
     queryFn: listRenderPresets,
   });
+  const publishPlatformsQuery = useQuery({
+    queryKey: ["publish-platform-settings"],
+    queryFn: getPublishPlatformSettings,
+  });
 
-  if (overviewQuery.isLoading || presetsQuery.isLoading || !overviewQuery.data || !presetsQuery.data) {
+  if (
+    overviewQuery.isLoading ||
+    presetsQuery.isLoading ||
+    publishPlatformsQuery.isLoading ||
+    !overviewQuery.data ||
+    !presetsQuery.data ||
+    !publishPlatformsQuery.data
+  ) {
     return <LoadingState label="Loading render queue setup…" className="min-h-56" />;
   }
 
@@ -27,6 +38,7 @@ export default function StoryQueueRoute() {
       storyId={storyId}
       bundles={overviewQuery.data.asset_bundles}
       presets={presetsQuery.data}
+      publishPlatforms={publishPlatformsQuery.data}
     />
   );
 }

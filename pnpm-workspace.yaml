@@ -3,6 +3,7 @@ packages:
   - apps/*
 
 onlyBuiltDependencies:
+  - '@clerk/shared'
   - '@tailwindcss/oxide'
   - esbuild
   - msw

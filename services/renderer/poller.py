@@ -20,6 +20,7 @@ from shared.workflow import JobStatus
 from .api_client import RenderApiClient, auth_headers
 from .executor import CommandExecutionError, CommandTimeoutError
 from .pipeline import render_job as render_pipeline_job
+from .tts import resolve_xtts_paths
 
 
 DISK_MIN_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
@@ -47,16 +48,35 @@ def _check_disk(job_id: int | str, cid: str) -> bool:
     return True
 
 
+def _validate_xtts_runtime() -> None:
+    try:
+        resolve_xtts_paths()
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
 def _validate_runtime() -> None:
     missing = [binary for binary in ("ffmpeg", "ffprobe") if shutil.which(binary) is None]
     if missing:
         raise RuntimeError(f"Missing required binaries: {', '.join(missing)}")
     if not settings.API_BASE_URL:
         raise RuntimeError("API_BASE_URL is required")
-    if not settings.ELEVENLABS_VOICE_ID:
+    provider = settings.TTS_PROVIDER.strip().lower()
+    if provider == "elevenlabs" and not settings.ELEVENLABS_VOICE_ID:
         log_info("config_warning", field="ELEVENLABS_VOICE_ID", message="TTS voice is unset")
+    elif provider == "xtts_local":
+        _validate_xtts_runtime()
     Path(settings.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     Path(settings.TMP_DIR).mkdir(parents=True, exist_ok=True)
+
+
+def _effective_max_concurrent() -> int:
+    configured = max(1, settings.MAX_CONCURRENT)
+    if settings.TTS_PROVIDER.strip().lower() == "xtts_local":
+        if configured > 1:
+            log_info("config_override", field="MAX_CONCURRENT", configured=configured, effective=1, provider="xtts_local")
+        return 1
+    return configured
 
 
 def poll_jobs(session: requests.sessions.Session | None = None) -> list[dict]:
@@ -199,11 +219,12 @@ def process_job(job: dict, session: requests.sessions.Session | None = None) -> 
 
 def run() -> None:  # pragma: no cover - continuous loop
     _validate_runtime()
-    log_info("start", cid="poller")
+    max_concurrent = _effective_max_concurrent()
+    log_info("start", cid="poller", max_concurrent=max_concurrent)
     HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
     HEARTBEAT_FILE.touch()
     backoff = backoff_schedule(settings.POLL_INTERVAL_MS, factor=1.0)
-    with ThreadPoolExecutor(max_workers=settings.MAX_CONCURRENT) as pool:
+    with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
         running: dict[int, object] = {}
         while True:
             HEARTBEAT_FILE.touch()
@@ -215,7 +236,7 @@ def run() -> None:  # pragma: no cover - continuous loop
                 continue
             for job in jobs:
                 job_id = int(job["id"])
-                if job_id in running or len(running) >= settings.MAX_CONCURRENT:
+                if job_id in running or len(running) >= max_concurrent:
                     continue
                 future = pool.submit(process_job, job)
                 running[job_id] = future

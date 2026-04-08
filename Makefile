@@ -1,7 +1,7 @@
-.PHONY: init sync test up down logs api web renderer renderer-logs renderer-run renderer-ffreport renderer-clean publisher publisher-logs ingest rebuild migrate smoke
+.PHONY: init sync test up all-up down logs api web renderer renderer-logs renderer-run renderer-ffreport renderer-clean scheduler scheduler-logs publisher publisher-logs ingest rebuild migrate smoke youtube-token
 
 VENV_DIR := .venv
-COMPOSE := docker compose -f infra/docker-compose.yml
+COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 
 init:
 	command -v uv >/dev/null 2>&1 || { echo "uv is required but not installed. See https://github.com/astral-sh/uv"; exit 1; }
@@ -17,6 +17,9 @@ test:
 
 up:
 	$(COMPOSE) --profile renderer --profile publisher up -d --build postgres redis api web renderer publisher
+
+all-up:
+	$(COMPOSE) --profile renderer --profile publisher --profile scheduler up -d --build postgres redis api web renderer publisher scheduler
 
 down:
 	$(COMPOSE) down
@@ -45,6 +48,12 @@ renderer-ffreport:
 renderer-clean:
 	$(COMPOSE) run --rm --no-deps renderer rm -rf /tmp/renderer/* /tmp/ffreport-*.log
 
+scheduler:
+	$(COMPOSE) --profile scheduler up -d scheduler
+
+scheduler-logs:
+	$(COMPOSE) logs -f --tail=0 scheduler
+
 publisher:
 	$(COMPOSE) up -d publisher
 
@@ -63,3 +72,6 @@ migrate:
 
 smoke:
 	API_BASE=http://localhost:8000 python scripts/smoke_e2e.py
+
+youtube-token:
+	uv run python token_gen.py

@@ -14,6 +14,7 @@ import requests
 from sqlmodel import Session, select
 
 from shared.config import settings
+from shared.logging import log_error
 
 from .models import (
     AnalysisReport,
@@ -151,6 +152,52 @@ def _object_focus(text: str) -> str:
     return words[0] if words else "unknown"
 
 
+def _responses_output_text(payload: dict[str, Any]) -> str | None:
+    direct = payload.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct
+    for item in payload.get("output") or []:
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content") or []:
+            if content.get("type") == "output_text":
+                text = content.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text
+    return None
+
+
+def _parse_candidate_payloads(parsed: dict[str, Any], *, candidate_offset: int, candidate_limit: int) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for index, candidate in enumerate((parsed.get("candidates") or [])[:candidate_limit], start=1):
+        episodes = []
+        for episode_index, episode in enumerate((candidate.get("episodes") or [])[:5], start=1):
+            lines = [str(line).strip() for line in episode.get("lines") or [] if str(line).strip()]
+            hook = str(episode.get("hook") or (lines[0] if lines else ""))
+            loop_line = str(episode.get("loop_line") or (lines[-1] if lines else ""))
+            episodes.append(
+                {
+                    "episode_type": str(episode.get("episode_type") or EPISODE_TYPES[min(episode_index - 1, len(EPISODE_TYPES) - 1)]),
+                    "body_md": str(episode.get("body_md") or "").strip(),
+                    "hook": hook,
+                    "lines": lines,
+                    "loop_line": loop_line,
+                    "features": _feature_map(hook, lines, loop_line),
+                }
+            )
+        if len(episodes) == 5:
+            candidates.append(
+                {
+                    "hook": str(candidate.get("hook") or "").strip(),
+                    "narration_text": str(candidate.get("narration_text") or "\n\n".join(item["body_md"] for item in episodes)).strip(),
+                    "outro": str(candidate.get("outro") or "").strip(),
+                    "episodes": episodes,
+                    "generation_metadata": {"source": "openai", "candidate_index": candidate_offset + index},
+                }
+            )
+    return candidates
+
+
 def extract_concept_payload(story: Story, *, session: Session | None = None) -> dict[str, Any]:
     source_text = story.body_md or story.title
     fallback = {
@@ -171,7 +218,7 @@ def extract_concept_payload(story: Story, *, session: Session | None = None) -> 
                 "role": "system",
                 "content": [
                     {
-                        "type": "text",
+                        "type": "input_text",
                         "text": (
                             "Extract a reusable horror concept from the source story. "
                             "Return strict JSON with concept_key, concept_label, anomaly_type, object_focus, specificity."
@@ -181,7 +228,7 @@ def extract_concept_payload(story: Story, *, session: Session | None = None) -> 
             },
             {
                 "role": "user",
-                "content": [{"type": "text", "text": json.dumps({"title": story.title, "text": source_text, "prompt": prompt})}],
+                "content": [{"type": "input_text", "text": json.dumps({"title": story.title, "text": source_text, "prompt": prompt})}],
             },
         ],
         "text": {
@@ -214,7 +261,7 @@ def extract_concept_payload(story: Story, *, session: Session | None = None) -> 
             timeout=60,
         )
         response.raise_for_status()
-        output_text = response.json().get("output_text")
+        output_text = _responses_output_text(response.json())
         if isinstance(output_text, str):
             parsed = json.loads(output_text)
             return {
@@ -225,9 +272,11 @@ def extract_concept_payload(story: Story, *, session: Session | None = None) -> 
                 "specificity": str(parsed.get("specificity") or fallback["specificity"]),
                 "extraction_metadata": {"source": "openai"},
             }
-    except Exception:
-        return fallback
-    return fallback
+    except Exception as exc:
+        log_error("refinement_extract_concept_openai_error", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL, error=str(exc))
+        raise RuntimeError(f"OpenAI concept extraction failed for story {story.id}: {exc}") from exc
+    log_error("refinement_extract_concept_invalid_response", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL)
+    raise RuntimeError(f"OpenAI concept extraction returned invalid JSON for story {story.id}")
 
 
 def upsert_story_concept(session: Session, story: Story, payload: dict[str, Any]) -> StoryConcept:
@@ -367,130 +416,128 @@ def generate_candidate_payloads(
         return _fallback_candidates(story, concept, candidate_count)
     generator_prompt = active_prompt(session, "generator").body if session else PROMPT_DEFAULTS["generator"]["body"]
     template_prompt = active_prompt(session, "template").body if session else PROMPT_DEFAULTS["template"]["body"]
-    payload = {
-        "model": settings.OPENAI_SCRIPT_MODEL,
-        "input": [
-            {"role": "system", "content": [{"type": "text", "text": generator_prompt}]},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(
-                            {
-                                "story": {
-                                    "title": story.title,
-                                    "author": story.author,
-                                    "source_url": story.source_url,
-                                    "body_md": story.body_md,
-                                },
-                                "concept": {
-                                    "concept_key": concept.concept_key,
-                                    "concept_label": concept.concept_label,
-                                    "anomaly_type": concept.anomaly_type,
-                                    "object_focus": concept.object_focus,
-                                    "specificity": concept.specificity,
-                                }
-                                if concept
-                                else None,
-                                "template": template_prompt,
-                                "candidate_count": candidate_count,
-                            }
-                        ),
-                    }
-                ],
-            },
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "script_batch",
-                "schema": {
+    schema = {
+        "type": "object",
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "items": {
                     "type": "object",
                     "properties": {
-                        "candidates": {
+                        "hook": {"type": "string"},
+                        "narration_text": {"type": "string"},
+                        "outro": {"type": "string"},
+                        "episodes": {
                             "type": "array",
+                            "minItems": 5,
+                            "maxItems": 5,
                             "items": {
                                 "type": "object",
                                 "properties": {
+                                    "episode_type": {"type": "string"},
+                                    "body_md": {"type": "string"},
                                     "hook": {"type": "string"},
-                                    "narration_text": {"type": "string"},
-                                    "outro": {"type": "string"},
-                                    "episodes": {
-                                        "type": "array",
-                                        "minItems": 5,
-                                        "maxItems": 5,
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "episode_type": {"type": "string"},
-                                                "body_md": {"type": "string"},
-                                                "hook": {"type": "string"},
-                                                "lines": {"type": "array", "items": {"type": "string"}},
-                                                "loop_line": {"type": "string"},
-                                            },
-                                            "required": ["episode_type", "body_md", "hook", "lines", "loop_line"],
-                                            "additionalProperties": False,
-                                        },
-                                    },
+                                    "lines": {"type": "array", "items": {"type": "string"}},
+                                    "loop_line": {"type": "string"},
                                 },
-                                "required": ["hook", "narration_text", "outro", "episodes"],
+                                "required": ["episode_type", "body_md", "hook", "lines", "loop_line"],
                                 "additionalProperties": False,
                             },
-                        }
+                        },
                     },
-                    "required": ["candidates"],
+                    "required": ["hook", "narration_text", "outro", "episodes"],
                     "additionalProperties": False,
                 },
             }
         },
+        "required": ["candidates"],
+        "additionalProperties": False,
     }
+    source_story = {
+        "title": story.title,
+        "author": story.author,
+        "source_url": story.source_url,
+        "body_md": story.body_md,
+    }
+    concept_payload = (
+        {
+            "concept_key": concept.concept_key,
+            "concept_label": concept.concept_label,
+            "anomaly_type": concept.anomaly_type,
+            "object_focus": concept.object_focus,
+            "specificity": concept.specificity,
+        }
+        if concept
+        else None
+    )
+    chunk_size = min(3, max(1, candidate_count))
+    candidates: list[dict[str, Any]] = []
     try:
-        response = requests.post(
-            "https://api.openai.com/v1/responses",
-            headers={
-                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=90,
-        )
-        response.raise_for_status()
-        output_text = response.json().get("output_text")
-        if isinstance(output_text, str):
+        for chunk_start in range(0, candidate_count, chunk_size):
+            chunk_count = min(chunk_size, candidate_count - chunk_start)
+            existing_hooks = [candidate["hook"] for candidate in candidates[-8:] if candidate.get("hook")]
+            system_prompt = (
+                f"{generator_prompt} "
+                "Return materially different candidates, not near-duplicates. "
+                "Vary the framing, pacing, reveal order, threat interpretation, and ending loop line across candidates."
+            )
+            payload = {
+                "model": settings.OPENAI_SCRIPT_MODEL,
+                "input": [
+                    {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": json.dumps(
+                                    {
+                                        "story": source_story,
+                                        "concept": concept_payload,
+                                        "template": template_prompt,
+                                        "candidate_count": chunk_count,
+                                        "candidate_offset": chunk_start,
+                                        "avoid_hooks": existing_hooks,
+                                        "notes": "Each candidate must stand on its own and should not reuse the same hook, outro, or episode arc ordering as earlier candidates.",
+                                    }
+                                ),
+                            }
+                        ],
+                    },
+                ],
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "script_batch",
+                        "schema": schema,
+                    }
+                },
+            }
+            response = requests.post(
+                "https://api.openai.com/v1/responses",
+                headers={
+                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=300,
+            )
+            response.raise_for_status()
+            output_text = _responses_output_text(response.json())
+            if not isinstance(output_text, str):
+                raise RuntimeError(f"OpenAI candidate generation returned no output text for story {story.id}")
             parsed = json.loads(output_text)
-            candidates = []
-            for index, candidate in enumerate((parsed.get("candidates") or [])[:candidate_count], start=1):
-                episodes = []
-                for episode_index, episode in enumerate((candidate.get("episodes") or [])[:5], start=1):
-                    lines = [str(line).strip() for line in episode.get("lines") or [] if str(line).strip()]
-                    hook = str(episode.get("hook") or (lines[0] if lines else ""))
-                    loop_line = str(episode.get("loop_line") or (lines[-1] if lines else ""))
-                    episodes.append(
-                        {
-                            "episode_type": str(episode.get("episode_type") or EPISODE_TYPES[min(episode_index - 1, len(EPISODE_TYPES) - 1)]),
-                            "body_md": str(episode.get("body_md") or "").strip(),
-                            "hook": hook,
-                            "lines": lines,
-                            "loop_line": loop_line,
-                            "features": _feature_map(hook, lines, loop_line),
-                        }
-                    )
-                if len(episodes) == 5:
-                    candidates.append(
-                        {
-                            "hook": str(candidate.get("hook") or "").strip(),
-                            "narration_text": str(candidate.get("narration_text") or "\n\n".join(item["body_md"] for item in episodes)).strip(),
-                            "outro": str(candidate.get("outro") or "").strip(),
-                            "episodes": episodes,
-                            "generation_metadata": {"source": "openai", "candidate_index": index},
-                        }
-                    )
-            if candidates:
-                return candidates
-    except Exception:
-        return _fallback_candidates(story, concept, candidate_count)
-    return _fallback_candidates(story, concept, candidate_count)
+            chunk_candidates = _parse_candidate_payloads(parsed, candidate_offset=chunk_start, candidate_limit=chunk_count)
+            if not chunk_candidates:
+                raise RuntimeError(f"OpenAI candidate generation returned no candidates for story {story.id}")
+            candidates.extend(chunk_candidates)
+        if candidates:
+            return candidates[:candidate_count]
+    except Exception as exc:
+        log_error("refinement_generate_candidates_openai_error", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL, error=str(exc))
+        raise RuntimeError(f"OpenAI candidate generation failed for story {story.id}: {exc}") from exc
+    log_error("refinement_generate_candidates_invalid_response", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL)
+    raise RuntimeError(f"OpenAI candidate generation returned invalid JSON for story {story.id}")
 
 
 def persist_candidates(

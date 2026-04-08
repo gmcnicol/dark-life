@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 from shared.config import settings
 from shared.workflow import PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus, RenderVariant
 
-from .models import PublishJob, Release, ReleaseRead, RenderArtifact, Story
+from .models import PublishJob, Release, ReleaseRead, RenderArtifact, Story, StudioSetting
 
 
 AUTOMATED_PLATFORMS = {"youtube", "instagram"}
@@ -25,13 +25,37 @@ WEEKLY_PLATFORMS = {"youtube"}
 SIGNED_URL_TTL_SECONDS = 15 * 60
 
 
-def active_publish_platforms() -> list[str]:
+def env_active_publish_platforms() -> list[str]:
     platforms = [
         platform.strip().lower()
         for platform in (settings.ACTIVE_PUBLISH_PLATFORMS or "").split(",")
         if platform.strip()
     ]
-    return list(dict.fromkeys(platforms)) or ["youtube"]
+    active = [platform for platform in platforms if platform in SHORT_PLATFORMS]
+    return list(dict.fromkeys(active)) or ["youtube"]
+
+
+def configured_publish_platforms() -> list[str]:
+    return env_active_publish_platforms()
+
+
+def active_publish_platforms(session: Session | None = None) -> list[str]:
+    allowed = configured_publish_platforms()
+    if session is not None:
+        setting = session.exec(
+            select(StudioSetting).where(StudioSetting.key == "active_publish_platforms")
+        ).first()
+        if setting and isinstance(setting.value, dict):
+            configured = setting.value.get("platforms")
+            if isinstance(configured, list):
+                platforms = [
+                    platform.strip().lower()
+                    for platform in configured
+                    if isinstance(platform, str) and platform.strip().lower() in allowed
+                ]
+                if platforms:
+                    return list(dict.fromkeys(platforms))
+    return allowed
 
 
 def delivery_mode_for_platform(platform: str) -> str:
@@ -42,14 +66,14 @@ def delivery_mode_for_platform(platform: str) -> str:
     )
 
 
-def validate_release_platform(platform: str, variant: str) -> None:
+def validate_release_platform(platform: str, variant: str, session: Session | None = None) -> None:
     allowed = SHORT_PLATFORMS if variant == RenderVariant.SHORT.value else WEEKLY_PLATFORMS
     if platform not in allowed:
         raise HTTPException(
             status_code=400,
             detail=f"Platform '{platform}' is not supported for variant '{variant}'",
         )
-    if platform not in active_publish_platforms():
+    if platform not in active_publish_platforms(session):
         raise HTTPException(
             status_code=400,
             detail=f"Platform '{platform}' is not active for publishing",
@@ -259,7 +283,7 @@ def _latest_release_time(
 def short_release_schedule(session: Session, *, count: int, now: datetime | None = None) -> list[datetime]:
     if count <= 0:
         return []
-    platforms = active_publish_platforms()
+    platforms = active_publish_platforms(session)
     anchor = _latest_release_time(session, variant=RenderVariant.SHORT.value, platforms=platforms)
     base = max([candidate for candidate in [anchor, now, datetime.now(timezone.utc)] if candidate is not None])
     first_slot = next_daily_publish_slot(base)
@@ -272,7 +296,7 @@ def weekly_compilation_schedule(
     after: datetime | None = None,
     now: datetime | None = None,
 ) -> datetime:
-    platforms = active_publish_platforms()
+    platforms = active_publish_platforms(session)
     latest_weekly = _latest_release_time(session, variant=RenderVariant.WEEKLY.value, platforms=platforms)
     candidates = [candidate for candidate in [after, latest_weekly, now, datetime.now(timezone.utc)] if candidate is not None]
     base = max(candidates)

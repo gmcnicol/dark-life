@@ -92,16 +92,21 @@ export function MetricCard({
   label,
   value,
   detail,
+  timestamp,
 }: {
   label: string;
   value: ReactNode;
   detail: string;
+  timestamp?: ReactNode;
 }) {
   return (
     <Panel className="space-y-4 p-5">
-      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
-        {label}
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
+          {label}
+        </p>
+        {timestamp ? <p className="text-[0.68rem] uppercase tracking-[0.2em] text-[var(--muted)]">{timestamp}</p> : null}
+      </div>
       <div className="flex items-end justify-between gap-4">
         <p className="font-display text-4xl tracking-[-0.04em] text-white">{value}</p>
         <p className="max-w-[12rem] text-right text-xs leading-5 text-[var(--text-soft)]">{detail}</p>

@@ -1,3 +1,4 @@
+import json
 import logging
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +27,8 @@ def client_fixture(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(db, "init_db", lambda: None)
     monkeypatch.setattr(main, "init_db", lambda: None)
+    monkeypatch.setattr(main, "ensure_default_presets", lambda _session: None)
+    monkeypatch.setattr(main, "ensure_default_prompt_versions", lambda _session: None)
     monkeypatch.setattr(admin_stories, "ADMIN_TOKEN", "token")
 
     app.dependency_overrides[get_session] = get_test_session
@@ -51,9 +54,18 @@ def test_upsert_story_logs_request(client: TestClient, caplog: pytest.LogCapture
     assert res.json()["external_id"] == "abc123"
 
     # ensure request was logged
+    request_logs = []
+    for record in caplog.records:
+        try:
+            log_payload = json.loads(record.getMessage())
+        except json.JSONDecodeError:
+            continue
+        if log_payload.get("event") == "request":
+            request_logs.append(log_payload)
+
     assert any(
-        getattr(r, "path", None) == "/admin/stories/" and getattr(r, "status", None) == 201
-        for r in caplog.records
+        log.get("path") == "/admin/stories/" and log.get("status") == 201
+        for log in request_logs
     )
 
     # duplicate should return 409

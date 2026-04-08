@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Release } from "@/lib/stories";
-import { approveRelease, completeManualPublish, retryRelease } from "@/lib/stories";
+import { approveRelease, clearRelease, completeManualPublish, retryRelease } from "@/lib/stories";
 import { ActionButton, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 function toLocalInputValue(value?: string | null): string {
@@ -54,6 +54,7 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<number, string>>({});
   const [videoIds, setVideoIds] = useState<Record<number, string>>({});
   const [manualNotes, setManualNotes] = useState<Record<number, string>>({});
+  const [previewOpen, setPreviewOpen] = useState<Record<number, boolean>>({});
   const [isPending, startTransition] = useTransition();
 
   const grouped = useMemo(
@@ -98,6 +99,14 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
         notes: manualNotes[release.id],
       }),
     );
+  };
+
+  const clear = (release: Release) => {
+    const confirmed = window.confirm(`Remove "${release.title}" from the publish queue and mark it done?`);
+    if (!confirmed) {
+      return;
+    }
+    mutate(async () => clearRelease(release.id));
   };
 
   if (releases.length === 0) {
@@ -166,25 +175,67 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {release.signed_asset_url ? (
-                        <a
-                          href={release.signed_asset_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/12"
-                        >
-                          Open asset
-                        </a>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewOpen((current) => ({
+                                ...current,
+                                [release.id]: !current[release.id],
+                              }))
+                            }
+                            className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/12"
+                          >
+                            {previewOpen[release.id] ? "Hide preview" : "Preview"}
+                          </button>
+                          <a
+                            href={release.signed_asset_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/12"
+                          >
+                            Open asset
+                          </a>
+                        </>
                       ) : null}
+                      <button
+                        type="button"
+                        onClick={() => clear(release)}
+                        disabled={isPending}
+                        className="inline-flex items-center justify-center rounded-full border border-rose-300/20 bg-rose-300/10 px-4 py-2.5 text-sm font-semibold text-rose-50 transition hover:-translate-y-0.5 hover:bg-rose-300/16 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Clear from queue
+                      </button>
                     </div>
                   </div>
 
                   {release.signed_asset_url ? (
-                    <video
-                      controls
-                      preload="metadata"
-                      className="w-full rounded-[1.25rem] border border-white/10 bg-black/30"
-                      src={release.signed_asset_url}
-                    />
+                    previewOpen[release.id] ? (
+                      <div className="max-w-xs rounded-[1.25rem] border border-white/10 bg-black/20 p-2">
+                        <video
+                          controls
+                          preload="metadata"
+                          className="aspect-[9/16] w-full rounded-[1rem] border border-white/8 bg-black/30 object-cover"
+                          src={release.signed_asset_url}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3 rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-soft)]">
+                        <span>Preview hidden in queue for faster scanning.</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewOpen((current) => ({
+                              ...current,
+                              [release.id]: true,
+                            }))
+                          }
+                          className="text-sm font-semibold text-cyan-100 transition hover:text-white"
+                        >
+                          Show preview
+                        </button>
+                      </div>
+                    )
                   ) : null}
 
                   <div className="grid gap-3 xl:grid-cols-2">

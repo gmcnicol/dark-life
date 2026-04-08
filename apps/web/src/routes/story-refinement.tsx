@@ -5,6 +5,7 @@ import {
   createScriptBatch,
   createScriptVersionReleases,
   getScriptBatch,
+  getPublishPlatformSettings,
   getStoryOverview,
   listAnalysisReports,
 } from "@/lib/stories";
@@ -42,6 +43,10 @@ export default function StoryRefinementRoute() {
     queryFn: () => listAnalysisReports({ story_id: storyId }),
     enabled: Number.isFinite(storyId),
   });
+  const publishPlatformsQuery = useQuery({
+    queryKey: ["publish-platform-settings"],
+    queryFn: getPublishPlatformSettings,
+  });
 
   const launchBatch = useMutation({
     mutationFn: () => createScriptBatch(storyId, { candidate_count: 20, shortlisted_count: 3, temperature: 1 }),
@@ -61,13 +66,16 @@ export default function StoryRefinementRoute() {
 
   const queueWinner = useMutation({
     mutationFn: (scriptVersionId: number) =>
-      createScriptVersionReleases(scriptVersionId, { platforms: ["youtube"], preset_slug: "short-form" }),
+      createScriptVersionReleases(scriptVersionId, {
+        platforms: publishPlatformsQuery.data?.active_platforms ?? ["youtube"],
+        preset_slug: "short-form",
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["story-overview", storyId] });
     },
   });
 
-  if (overviewQuery.isLoading || batchesQuery.isLoading) {
+  if (overviewQuery.isLoading || batchesQuery.isLoading || publishPlatformsQuery.isLoading) {
     return <LoadingState label="Loading refinement lab…" className="min-h-56" />;
   }
 

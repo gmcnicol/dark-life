@@ -19,6 +19,7 @@ from .stories import router as stories_router
 from .jobs import router as jobs_router
 from .reddit_admin import router as reddit_admin_router
 from .admin_stories import router as admin_stories_router
+from .admin_settings import router as admin_settings_router
 from .publish_jobs import router as publish_jobs_router
 from .public_artifacts import router as public_artifacts_router
 from .render_jobs import router as render_jobs_router
@@ -81,6 +82,7 @@ app.include_router(script_refinement_router)
 app.include_router(jobs_router)
 app.include_router(reddit_admin_router)
 app.include_router(admin_stories_router)
+app.include_router(admin_settings_router)
 app.include_router(render_jobs_router)
 app.include_router(publish_jobs_router)
 app.include_router(public_artifacts_router)

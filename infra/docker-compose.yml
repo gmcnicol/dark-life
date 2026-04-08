@@ -53,6 +53,9 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_CLERK_ENABLED: ${VITE_CLERK_ENABLED:-false}
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
     env_file: ../.env
     environment:
       API_BASE_URL: ${API_BASE_URL:-http://api:8000}
@@ -81,6 +84,7 @@ services:
     volumes:
       - ../content:/content
       - ../output:/output
+      - ${XTTS_MOUNT_ROOT:-/Volumes}:${XTTS_MOUNT_ROOT:-/Volumes}:ro
     logging:
       driver: json-file
       options:
@@ -98,6 +102,29 @@ services:
       retries: 5
     profiles:
       - renderer
+
+  refinement:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    command: python -u -m services.refinement.poller
+    env_file: ../.env
+    environment:
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+      SERVICE_NAME: refinement
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "from pathlib import Path; import time; p=Path('/tmp/renderer/refinement_heartbeat'); raise SystemExit(0 if p.exists() and time.time()-p.stat().st_mtime < 60 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   scheduler:
     build:
@@ -127,7 +154,8 @@ services:
       SERVICE_NAME: publisher
     volumes:
       - ../output:/output
-      - ../secrets:/secrets:ro
+      - ../secrets/client_secret.json:/secrets/client_secret.json:ro
+      - ../secrets/token.json:/secrets/token.json
     depends_on:
       api:
         condition: service_healthy

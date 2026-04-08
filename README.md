@@ -15,10 +15,13 @@ Legacy runtimes such as the old Flask app and `video_renderer` stack have been r
 ## Quick start
 
 1. Copy `.env.example` to `.env` and fill in at least:
+   - `VITE_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`, unless `VITE_CLERK_ENABLED=false`
    - `API_AUTH_TOKEN`
    - `ADMIN_API_TOKEN` with the same value
-   - `ELEVENLABS_API_KEY`
-   - `ELEVENLABS_VOICE_ID`
+   - either `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`
+   - or `TTS_PROVIDER=xtts_local` plus `XTTS_MODEL_DIR` and `XTTS_SPEAKER_WAV` for your local trained voice
+   - if you keep multiple refined checkpoints in the same artifact directory, the renderer auto-selects the highest-step `best_model*.pth`
+   - when running XTTS through Docker, `XTTS_MOUNT_ROOT` set to a shared ancestor of those `XTTS_*` paths so the renderer container can see them at the same absolute paths
    - `OPENAI_API_KEY` if you want OpenAI-backed script adaptation or Whisper API transcription
 2. Install dependencies:
    - `uv sync`

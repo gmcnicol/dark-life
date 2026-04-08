@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { listReleaseQueue, listStories } from "@/lib/stories";
+import { enqueueRedditIncremental, listReleaseQueue, listStories } from "@/lib/stories";
 import { STATUS_LABELS, nextWorkspaceRoute, statusTone } from "@/lib/workflow";
 import {
+  ActionButton,
   EmptyState,
   MetricCard,
   PageHeader,
@@ -12,9 +14,35 @@ import {
   LoadingState,
 } from "@/components/ui-surfaces";
 
+function telemetryTimestampLabel(updatedAt: number): string {
+  if (!updatedAt) {
+    return "Awaiting sync";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(updatedAt);
+}
+
 export default function DashboardRoute() {
+  const queryClient = useQueryClient();
+  const [subredditInput, setSubredditInput] = useState("");
   const storiesQuery = useQuery({ queryKey: ["stories"], queryFn: () => listStories({ limit: 100 }) });
   const releasesQuery = useQuery({ queryKey: ["release-queue"], queryFn: listReleaseQueue });
+  const ingestMutation = useMutation({
+    mutationFn: async () => {
+      const subreddits = subredditInput
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      return enqueueRedditIncremental(subreddits.length ? { subreddits } : {});
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["stories"] });
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
 
   const stories = storiesQuery.data ?? [];
   const releaseQueue = releasesQuery.data ?? [];
@@ -69,11 +97,73 @@ export default function DashboardRoute() {
       />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Active stories" value={storiesQuery.isLoading ? "…" : activeStories.length} detail="Stories still moving through review, media, render, or publish handoff." />
-        <MetricCard label="Script pressure" value={storiesQuery.isLoading ? "…" : (counts.ingested ?? 0) + (counts.scripted ?? 0)} detail="Items still waiting for script approval or narrative cleanup." />
-        <MetricCard label="Render pressure" value={storiesQuery.isLoading ? "…" : (counts.queued ?? 0) + (counts.rendering ?? 0)} detail="Stories already committed to render execution or actively processing." />
-        <MetricCard label="Publish queue" value={releasesQuery.isLoading ? "…" : releaseQueue.length} detail="Releases currently waiting on approval, schedule, delivery, or manual completion." />
+        <MetricCard label="Active stories" value={storiesQuery.isLoading ? "…" : activeStories.length} detail="Stories still moving through review, media, render, or publish handoff." timestamp={telemetryTimestampLabel(storiesQuery.dataUpdatedAt)} />
+        <MetricCard label="Script pressure" value={storiesQuery.isLoading ? "…" : (counts.ingested ?? 0) + (counts.scripted ?? 0)} detail="Items still waiting for script approval or narrative cleanup." timestamp={telemetryTimestampLabel(storiesQuery.dataUpdatedAt)} />
+        <MetricCard label="Render pressure" value={storiesQuery.isLoading ? "…" : (counts.queued ?? 0) + (counts.rendering ?? 0)} detail="Stories already committed to render execution or actively processing." timestamp={telemetryTimestampLabel(storiesQuery.dataUpdatedAt)} />
+        <MetricCard label="Publish queue" value={releasesQuery.isLoading ? "…" : releaseQueue.length} detail="Releases currently waiting on approval, schedule, delivery, or manual completion." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
       </section>
+
+      <Panel className="space-y-4">
+        <SectionHeading
+          eyebrow="Ingestion"
+          title="Manual Reddit retrieval"
+          description="Run incremental Reddit fetches directly from the overview page. Blank uses the default subreddit order."
+          action={
+            <ActionButton
+              onClick={() => ingestMutation.mutate()}
+              disabled={ingestMutation.isPending}
+            >
+              {ingestMutation.isPending ? "Running…" : "Run retrieval"}
+            </ActionButton>
+          }
+        />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(16rem,0.7fr)]">
+          <label className="space-y-2">
+            <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
+              Subreddit override
+            </span>
+            <textarea
+              value={subredditInput}
+              onChange={(event) => setSubredditInput(event.target.value)}
+              rows={3}
+              placeholder="Odd_directions, shortscarystories, nosleep"
+              className="min-h-24 w-full rounded-[1.2rem] border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
+            />
+            <p className="text-sm leading-6 text-[var(--text-soft)]">
+              Blank uses the default order: Odd_directions, shortscarystories, nosleep, stayawake, Ruleshorror, libraryofshadows, JustNotRight, TheCrypticCompendium, SignalHorrorFiction, scarystories, SLEEPSPELL, TwoSentenceHorror.
+            </p>
+          </label>
+          <div className="rounded-[1.25rem] border border-white/8 bg-white/[0.03] p-4">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
+              Retrieval result
+            </p>
+            {ingestMutation.isSuccess ? (
+              <div className="mt-3 space-y-3">
+                <p className="text-sm text-white">
+                  Inserted {ingestMutation.data.total_inserted} new stor{ingestMutation.data.total_inserted === 1 ? "y" : "ies"}.
+                </p>
+                <div className="space-y-2">
+                  {ingestMutation.data.results.map((result) => (
+                    <div key={result.subreddit} className="flex items-center justify-between gap-3 rounded-[1rem] border border-white/8 bg-black/20 px-3 py-2">
+                      <StatusBadge tone="accent">r/{result.subreddit}</StatusBadge>
+                      <span className="text-sm text-[var(--text-soft)]">{result.inserted} inserted</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-[var(--text-soft)]">
+                This action runs through `/api/admin/reddit/incremental` on the web server proxy and executes the fetch immediately.
+              </p>
+            )}
+            {ingestMutation.isError ? (
+              <p className="mt-3 text-sm text-rose-200">
+                {ingestMutation.error instanceof Error ? ingestMutation.error.message : "Unable to run retrieval."}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </Panel>
 
       {(storiesQuery.isLoading || releasesQuery.isLoading) ? (
         <LoadingState label="Loading dashboard queues…" className="min-h-64" />

@@ -196,7 +196,7 @@ def _list_existing_story_images(session: Session, story_id: int) -> list[Asset]:
     ).all()
 
 
-def _fetch_pixabay_assets(keywords: str) -> list[dict[str, Any]]:
+def _fetch_pixabay_assets(keywords: str, *, page: int = 1) -> list[dict[str, Any]]:
     if not settings.PIXABAY_API_KEY:
         return []
     try:
@@ -208,6 +208,7 @@ def _fetch_pixabay_assets(keywords: str) -> list[dict[str, Any]]:
                 "image_type": "photo",
                 "orientation": "vertical",
                 "per_page": 12,
+                "page": max(page, 1),
                 "safesearch": "true",
             },
             timeout=12,
@@ -567,20 +568,28 @@ def list_asset_library(
 
 
 @router.post("/stories/{story_id}/assets/index", response_model=list[MediaReference])
-def index_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+def index_story_assets(
+    story_id: int,
+    page: int = Query(default=1, ge=1),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
     story = _get_story(session, story_id)
-    return normalize_asset_refs(_fetch_pixabay_assets(_extract_image_keywords(story)))
+    return normalize_asset_refs(_fetch_pixabay_assets(_extract_image_keywords(story), page=page))
 
 
 @router.get("/stories/{story_id}/assets", response_model=list[MediaReference])
-def list_story_assets(story_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+def list_story_assets(
+    story_id: int,
+    page: int = Query(default=1, ge=1),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
     story = _get_story(session, story_id)
-    return normalize_asset_refs(_fetch_pixabay_assets(_extract_image_keywords(story)))
+    return normalize_asset_refs(_fetch_pixabay_assets(_extract_image_keywords(story), page=page))
 
 
 @router.get("/stories/{story_id}/asset-bundles", response_model=list[AssetBundleRead])
 def list_asset_bundles(story_id: int, session: Session = Depends(get_session)) -> list[AssetBundle]:
-    _get_story(session, story_id)
+    story = _get_story(session, story_id)
     parts = session.exec(
         select(StoryPart)
         .where(
@@ -608,8 +617,10 @@ def create_bundle(
 ) -> AssetBundle:
     story = _get_story(session, story_id)
     parts = session.exec(
-        select(StoryPart)
-        .where(StoryPart.story_id == story_id)
+        select(StoryPart).where(
+            StoryPart.story_id == story_id,
+            StoryPart.script_version_id == story.active_script_version_id,
+        )
         .order_by(StoryPart.index)
     ).all()
     part_asset_rows = [row.model_dump() if isinstance(row, PartMediaSelection) else row for row in (bundle_in.part_asset_map or [])]
@@ -651,20 +662,19 @@ def create_releases(
     preset = session.exec(select(RenderPreset).where(RenderPreset.slug == payload.preset_slug)).first()
     if not preset:
         raise HTTPException(status_code=404, detail="Render preset not found")
-    platforms = payload.platforms or active_publish_platforms()
+    platforms = payload.platforms or active_publish_platforms(session)
     for platform in platforms:
-        validate_release_platform(platform, preset.variant)
+        validate_release_platform(platform, preset.variant, session)
     bundle_id = payload.asset_bundle_id or story.active_asset_bundle_id
     if not bundle_id:
         raise HTTPException(status_code=400, detail="Active asset bundle required")
     bundle = session.get(AssetBundle, bundle_id)
     if not bundle:
         raise HTTPException(status_code=404, detail="Asset bundle not found")
-    parts = session.exec(
-        select(StoryPart)
-        .where(StoryPart.story_id == story_id)
-        .order_by(StoryPart.index)
-    ).all()
+    parts_query = select(StoryPart).where(StoryPart.story_id == story_id)
+    if story.active_script_version_id:
+        parts_query = parts_query.where(StoryPart.script_version_id == story.active_script_version_id)
+    parts = session.exec(parts_query.order_by(StoryPart.index)).all()
     bundle.asset_refs = bundle_asset_refs(bundle, session)
     bundle.part_asset_map = bundle_part_asset_map(bundle, parts, session)
     if parts and len(bundle.part_asset_map) != len(parts):
@@ -722,7 +732,7 @@ def approve_release(
     release = session.get(Release, release_id)
     if not release:
         raise HTTPException(status_code=404, detail="Release not found")
-    validate_release_platform(release.platform, release.variant)
+    validate_release_platform(release.platform, release.variant, session)
     if not release.render_artifact_id:
         raise HTTPException(status_code=400, detail="Release is missing a render artifact")
     if payload.title is not None:
@@ -823,6 +833,47 @@ def complete_manual_publish(
     return release_read(session, release)
 
 
+@router.post("/releases/{release_id}/clear", response_model=ReleaseRead)
+def clear_release_from_queue(
+    release_id: int,
+    session: Session = Depends(get_session),
+) -> ReleaseRead:
+    release = session.get(Release, release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+    if release.status == ReleaseStatus.PUBLISHED.value:
+        return release_read(session, release)
+
+    cleared_at = datetime.now(timezone.utc)
+    release.last_error = None
+    release.approval_status = PublishApprovalStatus.APPROVED.value
+    release.published_at = cleared_at
+    release.provider_metadata = {
+        **(release.provider_metadata or {}),
+        "queue_cleared": True,
+        "queue_cleared_at": cleared_at.isoformat(),
+    }
+    _sync_release_state(release, ReleaseStatus.PUBLISHED.value)
+
+    publish_job = resolve_publish_job(session, release.id or 0)
+    if publish_job:
+        publish_job.status = PublishJobStatus.PUBLISHED.value
+        publish_job.error_class = None
+        publish_job.error_message = None
+        publish_job.stderr_snippet = None
+        publish_job.result = {
+            **(publish_job.result or {}),
+            "queue_cleared": True,
+            "queue_cleared_at": cleared_at.isoformat(),
+        }
+        session.add(publish_job)
+
+    session.add(release)
+    maybe_mark_story_published(session, release.story_id)
+    session.commit()
+    return release_read(session, release)
+
+
 @router.post("/stories/{story_id}/compilations", response_model=CompilationRead)
 def create_compilation(
     story_id: int,
@@ -835,7 +886,7 @@ def create_compilation(
     if not preset:
         raise HTTPException(status_code=404, detail="Render preset not found")
     for platform in payload.platforms:
-        validate_release_platform(platform, RenderVariant.WEEKLY.value)
+        validate_release_platform(platform, RenderVariant.WEEKLY.value, session)
     compilation, _job = create_weekly_compilation(session, story, preset=preset)
     story_short_releases = session.exec(
         select(Release)

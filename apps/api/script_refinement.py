@@ -421,9 +421,9 @@ def create_script_version_releases(
     preset = session.exec(select(RenderPreset).where(RenderPreset.slug == payload.preset_slug)).first()
     if not preset:
         raise HTTPException(status_code=404, detail="Render preset not found")
-    platforms = payload.platforms or active_publish_platforms()
+    platforms = payload.platforms or active_publish_platforms(session)
     for platform in platforms:
-        validate_release_platform(platform, preset.variant)
+        validate_release_platform(platform, preset.variant, session)
     bundle_id = payload.asset_bundle_id or story.active_asset_bundle_id
     if not bundle_id:
         raise HTTPException(status_code=400, detail="Active asset bundle required")

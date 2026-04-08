@@ -333,6 +333,18 @@ def update_render_job_status(
         if story:
             story.status = StoryStatus.PUBLISH_READY.value
             session.add(story)
+    elif update.status == JobStatus.ERRORED.value:
+        for release in release_for_artifact(
+            session,
+            story_id=job.story_id or 0,
+            story_part_id=job.story_part_id,
+            compilation_id=job.compilation_id,
+            script_version_id=job.script_version_id,
+        ):
+            release.status = ReleaseStatus.ERRORED.value
+            release.publish_status = ReleaseStatus.ERRORED.value
+            release.last_error = update.error_message or update.stderr_snippet or "Render failed"
+            session.add(release)
 
     session.add(job)
     session.commit()

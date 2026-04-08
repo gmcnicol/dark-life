@@ -32,6 +32,13 @@ def _default_subreddits() -> List[str]:
     return parse_csv_list(settings.REDDIT_DEFAULT_SUBREDDITS)
 
 
+def run_incremental_fetch(subreddit: str) -> int:
+    os.environ.setdefault("METRICS_ENABLED", "false")
+    from services.reddit_ingestor.incremental import fetch_incremental
+
+    return fetch_incremental(subreddit)
+
+
 # ---------------------------------------------------------------------------
 # Table definition for reddit_fetch_state
 # ---------------------------------------------------------------------------
@@ -95,14 +102,13 @@ def enqueue_incremental(
     _: None = Depends(require_token),
 ) -> dict:
     subs = req.subreddits or _default_subreddits()
-    jobs: List[dict] = []
+    results: List[dict] = []
+    total_inserted = 0
     for sub in subs:
-        job = Job(kind="reddit_incremental", status="queued", payload={"subreddit": sub})
-        session.add(job)
-        session.commit()
-        session.refresh(job)
-        jobs.append({"id": job.id, "subreddit": sub, "kind": job.kind, "status": job.status})
-    return {"jobs": jobs}
+        inserted = run_incremental_fetch(sub)
+        total_inserted += inserted
+        results.append({"subreddit": sub, "inserted": inserted})
+    return {"results": results, "total_inserted": total_inserted}
 
 
 @router.get("/state")

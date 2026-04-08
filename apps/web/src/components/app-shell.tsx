@@ -1,6 +1,8 @@
+import { UserButton } from "@clerk/react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { clerkEnabled } from "@/lib/auth-config";
 import { listReleaseQueue, listStories } from "@/lib/stories";
 import { cn } from "@/lib/utils";
 import KeyboardShortcuts from "./keyboard-shortcuts";
@@ -154,7 +156,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </p>
                 <h1 className="font-display text-2xl tracking-[-0.04em] text-white">Studio</h1>
               </div>
-              <StatusBadge tone="accent">Live</StatusBadge>
+              <div className="flex items-center gap-3">
+                <StatusBadge tone="accent">Live</StatusBadge>
+                {clerkEnabled ? (
+                  <div className="rounded-full border border-white/10 bg-white/5 p-1">
+                    <UserButton />
+                  </div>
+                ) : null}
+              </div>
             </div>
             <p className="text-sm leading-6 text-[var(--text-soft)]">
               Editorial triage, media assembly, render queueing, and publish handoff in one operator surface.

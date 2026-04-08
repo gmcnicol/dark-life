@@ -33,6 +33,15 @@ class TimestampedModel(SQLModel):
     )
 
 
+class StudioSettingBase(SQLModel):
+    key: str = Field(sa_column=Column(String, unique=True, nullable=False, index=True))
+    value: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+
+
+class StudioSetting(StudioSettingBase, TimestampedModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
 class StoryBase(SQLModel):
     title: str
     subreddit: Optional[str] = None

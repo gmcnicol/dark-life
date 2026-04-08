@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import type { AssetBundle, RenderPreset, Story } from "@/lib/stories";
+import { Link, useNavigate } from "react-router-dom";
+import type { AssetBundle, PublishPlatformSettings, RenderPreset, Story } from "@/lib/stories";
 import { createCompilation, createShortReleases } from "@/lib/stories";
-import { canQueueRenders, STATUS_LABELS } from "@/lib/workflow";
+import { STATUS_LABELS } from "@/lib/workflow";
 import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 export default function EnqueueDialog({
@@ -13,30 +13,81 @@ export default function EnqueueDialog({
   storyId,
   bundles,
   presets,
+  publishPlatforms,
 }: {
   story: Story;
   storyId: number;
   bundles: AssetBundle[];
   presets: RenderPreset[];
+  publishPlatforms: PublishPlatformSettings;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [platforms] = useState<string[]>(["youtube"]);
   const [presetSlug, setPresetSlug] = useState("short-form");
   const [bundleId, setBundleId] = useState<number | null>(bundles[0]?.id ?? null);
-  const [includeWeekly, setIncludeWeekly] = useState(true);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(publishPlatforms.active_platforms);
+  const [includeWeekly, setIncludeWeekly] = useState(publishPlatforms.active_platforms.includes("youtube"));
   const [isPending, startTransition] = useTransition();
-  const canQueue = canQueueRenders(story.status);
+  const activePlatforms = publishPlatforms.active_platforms;
+  const queueEligibleStatus = story.status === "approved" || story.status === "media_ready";
+  const hasBundle = bundles.length > 0;
+  const canConfigureQueue = queueEligibleStatus && hasBundle;
+  const youtubeAvailable = activePlatforms.includes("youtube");
+  const youtubeSelected = selectedPlatforms.includes("youtube");
+  const inactivePlatforms = useMemo(
+    () => publishPlatforms.available_platforms.filter((platform) => !activePlatforms.includes(platform)),
+    [activePlatforms, publishPlatforms.available_platforms],
+  );
+  const isCommitted =
+    story.status === "queued" ||
+    story.status === "rendering" ||
+    story.status === "rendered" ||
+    story.status === "publish_ready" ||
+    story.status === "published";
+  const selectedBundle = bundles.find((bundle) => bundle.id === bundleId) ?? bundles[0] ?? null;
+
+  useEffect(() => {
+    setSelectedPlatforms((current) => {
+      const valid = current.filter((platform) => activePlatforms.includes(platform));
+      return valid.length > 0 ? valid : activePlatforms;
+    });
+  }, [activePlatforms]);
+
+  useEffect(() => {
+    if (!youtubeAvailable || !youtubeSelected) {
+      setIncludeWeekly(false);
+    }
+  }, [youtubeAvailable, youtubeSelected]);
+
+  useEffect(() => {
+    if (!selectedBundle) {
+      setBundleId(null);
+      return;
+    }
+    setBundleId((current) => (current && bundles.some((bundle) => bundle.id === current) ? current : selectedBundle.id));
+  }, [bundles, selectedBundle]);
+
+  const togglePlatform = (platform: string) => {
+    if (!canConfigureQueue) {
+      return;
+    }
+    setSelectedPlatforms((current) => {
+      if (current.includes(platform)) {
+        return current.length === 1 ? current : current.filter((item) => item !== platform);
+      }
+      return [...current, platform];
+    });
+  };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     startTransition(async () => {
       await createShortReleases(storyId, {
-        platforms,
+        platforms: selectedPlatforms,
         preset_slug: presetSlug,
         asset_bundle_id: bundleId,
       });
-      if (includeWeekly) {
+      if (includeWeekly && youtubeSelected) {
         await createCompilation(storyId, {
           preset_slug: "weekly-full",
           platforms: ["youtube"],
@@ -75,7 +126,7 @@ export default function EnqueueDialog({
               value={presetSlug}
               onChange={(event) => setPresetSlug(event.target.value)}
               data-testid="preset-select"
-              disabled={!canQueue}
+              disabled={!canConfigureQueue}
               className="w-full rounded-[1.2rem] border border-white/10 bg-black/20 px-4 py-3 outline-none focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
             >
               {presets
@@ -94,7 +145,7 @@ export default function EnqueueDialog({
             <select
               value={bundleId ?? ""}
               onChange={(event) => setBundleId(Number(event.target.value))}
-              disabled={!canQueue}
+              disabled={!canConfigureQueue || !hasBundle}
               className="w-full rounded-[1.2rem] border border-white/10 bg-black/20 px-4 py-3 outline-none focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
             >
               {bundles.map((bundle) => (
@@ -107,19 +158,35 @@ export default function EnqueueDialog({
         </div>
 
         <div className="space-y-3">
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
-            Active platform
-          </p>
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">Delivery targets</p>
           <div className="flex flex-wrap gap-3">
-            <span className="rounded-full border border-cyan-300/35 bg-cyan-300/[0.12] px-4 py-2 text-sm font-semibold text-cyan-50">
-              YouTube
-            </span>
-            <span className="rounded-full border border-white/10 px-4 py-2 text-sm text-[var(--text-soft)]">
-              Instagram disabled
-            </span>
+            {activePlatforms.map((platform) => (
+              <button
+                key={platform}
+                type="button"
+                onClick={() => togglePlatform(platform)}
+                disabled={!canConfigureQueue}
+                className={[
+                  "rounded-full border px-4 py-2 text-sm font-semibold transition",
+                  selectedPlatforms.includes(platform)
+                    ? "border-cyan-300/35 bg-cyan-300/[0.12] text-cyan-50"
+                    : "border-white/10 bg-white/[0.03] text-[var(--text-soft)]",
+                  !canConfigureQueue && "cursor-not-allowed opacity-60",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {platform === "youtube" ? "YouTube" : platform === "instagram" ? "Instagram" : "TikTok"}
+              </button>
+            ))}
+            {inactivePlatforms.map((platform) => (
+              <span key={platform} className="rounded-full border border-white/10 px-4 py-2 text-sm text-[var(--text-soft)]">
+                {(platform === "youtube" ? "YouTube" : platform === "instagram" ? "Instagram" : "TikTok")} disabled
+              </span>
+            ))}
           </div>
           <p className="text-sm text-[var(--text-soft)]">
-            Shorts are scheduled daily at 12:00 UTC. The full-story YouTube compilation is scheduled for Friday at 12:00 UTC after the short run.
+            Queue now, then fine-tune individual publish times in the <Link to="/publish" className="text-cyan-100 underline decoration-white/20 underline-offset-4">publish queue</Link>. Default cadence is daily shorts at 12:00 UTC, with an optional Friday full-story YouTube compilation.
           </p>
         </div>
 
@@ -132,19 +199,63 @@ export default function EnqueueDialog({
             type="checkbox"
             checked={includeWeekly}
             onChange={(event) => setIncludeWeekly(event.target.checked)}
-            disabled={!canQueue}
+            disabled={!canConfigureQueue || !youtubeSelected}
             data-testid="captions-checkbox"
           />
           Create a weekly full-story compilation for YouTube
         </label>
+        {!youtubeAvailable ? (
+          <p className="text-sm text-[var(--text-soft)]">
+            Weekly compilation is unavailable while YouTube is inactive.
+          </p>
+        ) : !youtubeSelected ? (
+          <p className="text-sm text-[var(--text-soft)]">
+            Select YouTube above if you want the weekly compilation scheduled.
+          </p>
+        ) : null}
+
+        {!hasBundle ? (
+          <div className="rounded-[1.3rem] border border-amber-400/20 bg-amber-400/[0.08] px-4 py-4 text-sm text-amber-50">
+            This story is not queue-ready yet because no asset bundle is attached. Finish media selection first.
+            <div className="mt-3">
+              <Link
+                to={`/story/${storyId}/media`}
+                className="inline-flex rounded-full border border-amber-300/30 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/8"
+              >
+                Open media stage
+              </Link>
+            </div>
+          </div>
+        ) : null}
+
+        {story.status === "scripted" || story.status === "ingested" ? (
+          <div className="rounded-[1.3rem] border border-white/8 bg-white/[0.03] px-4 py-4 text-sm text-[var(--text-soft)]">
+            Queueing is premature for this story. Approve the script first, then lock media, then return here.
+          </div>
+        ) : null}
+
+        {isCommitted ? (
+          <div className="rounded-[1.3rem] border border-white/8 bg-white/[0.03] px-4 py-4 text-sm text-[var(--text-soft)]">
+            This story has already moved past queue setup. Track render execution in <Link to={`/story/${storyId}/jobs`} className="text-cyan-100 underline decoration-white/20 underline-offset-4">Jobs</Link> or adjust publish timing in <Link to="/publish" className="text-cyan-100 underline decoration-white/20 underline-offset-4">Publish</Link>.
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-3">
-          <ActionButton type="submit" disabled={isPending || !bundleId || !canQueue}>
+          <ActionButton
+            type="submit"
+            disabled={
+              isPending || !bundleId || !canConfigureQueue || selectedPlatforms.length === 0 || isCommitted
+            }
+          >
             {isPending ? "Queueing…" : "Queue and schedule"}
           </ActionButton>
-          {!canQueue ? (
+          {!queueEligibleStatus ? (
             <p className="text-sm text-[var(--text-soft)]">
-              Queueing unlocks only when the story is media-ready.
+              Queue setup unlocks once the story reaches approval and has a locked bundle.
+            </p>
+          ) : selectedPlatforms.length === 0 ? (
+            <p className="text-sm text-[var(--text-soft)]">
+              Pick at least one delivery target before queueing.
             </p>
           ) : null}
         </div>

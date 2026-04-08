@@ -7,7 +7,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from apps.api.db import get_session
 import apps.api.main as main
 import apps.api.stories as stories_api
-from apps.api.models import Release, Story
+from apps.api.models import PublishJob, Release, Story
 from apps.api.pipeline import ensure_default_presets
 from shared.workflow import PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus, RenderVariant
 
@@ -70,8 +70,9 @@ def test_story_asset_index_uses_mood_first_pixabay_query(client, monkeypatch: py
     client, _engine = client
     captured: dict[str, str] = {}
 
-    def fake_fetch(keywords: str):
+    def fake_fetch(keywords: str, *, page: int = 1):
         captured["keywords"] = keywords
+        captured["page"] = str(page)
         return [
             {
                 "remote_url": "https://example.com/eerie.jpg",
@@ -100,6 +101,7 @@ def test_story_asset_index_uses_mood_first_pixabay_query(client, monkeypatch: py
 
     assert res.status_code == 200
     keywords = captured["keywords"].split()
+    assert captured["page"] == "1"
     assert keywords[:3] == ["vacant", "stillness", "silhouette"]
     assert "uncanny" in keywords
     assert "knife" not in keywords
@@ -111,7 +113,7 @@ def test_story_asset_index_moves_latest_fetch_results_to_top(client, monkeypatch
     client, _engine = client
     fetch_round = {"count": 0}
 
-    def fake_fetch(_keywords: str):
+    def fake_fetch(_keywords: str, *, page: int = 1):
         fetch_round["count"] += 1
         if fetch_round["count"] == 1:
             return [
@@ -192,7 +194,7 @@ def test_story_asset_list_returns_latest_fetch_set(client, monkeypatch: pytest.M
     client, _engine = client
     fetch_round = {"count": 0}
 
-    def fake_fetch(_keywords: str):
+    def fake_fetch(_keywords: str, *, page: int = 1):
         fetch_round["count"] += 1
         if fetch_round["count"] == 1:
             return [
@@ -246,7 +248,7 @@ def test_create_bundle_and_release_jobs(client, tmp_path, monkeypatch: pytest.Mo
     monkeypatch.setattr(
         stories_api,
         "_fetch_pixabay_assets",
-        lambda keywords: [
+        lambda keywords, page=1: [
             {
                 "remote_url": "https://example.com/fog.jpg",
                 "provider": "pixabay",
@@ -308,6 +310,127 @@ def test_create_bundle_and_release_jobs(client, tmp_path, monkeypatch: pytest.Mo
     assert jobs.json()[0]["kind"] == "render_part"
 
 
+def test_clear_release_marks_it_done_and_updates_publish_job(client, monkeypatch: pytest.MonkeyPatch):
+    client, engine = client
+    monkeypatch.setattr(
+        stories_api,
+        "_fetch_pixabay_assets",
+        lambda keywords, page=1: [
+            {
+                "remote_url": "https://example.com/fog.jpg",
+                "provider": "pixabay",
+                "provider_id": "asset-1",
+                "type": "image",
+                "orientation": "portrait",
+                "tags": ["fog", "night"],
+                "width": 1080,
+                "height": 1920,
+                "attribution": "tester",
+            }
+        ],
+    )
+
+    story = client.post(
+        "/stories",
+        json={
+            "title": "Clear queue",
+            "body_md": "One. Two. Three.",
+        },
+    ).json()
+    client.post(f"/stories/{story['id']}/script")
+    assets = client.post(f"/stories/{story['id']}/assets/index").json()
+    bundle = client.post(
+        f"/stories/{story['id']}/asset-bundles",
+        json={"name": "Primary", "asset_refs": [assets[0]]},
+    ).json()
+    release = client.post(
+        f"/stories/{story['id']}/releases",
+        json={
+            "platforms": ["youtube"],
+            "preset_slug": "short-form",
+            "asset_bundle_id": bundle["id"],
+        },
+    ).json()[0]
+
+    with Session(engine) as session:
+        publish_job = PublishJob(release_id=release["id"], platform="youtube", status="errored")
+        session.add(publish_job)
+        session.commit()
+
+    cleared = client.post(f"/releases/{release['id']}/clear")
+    assert cleared.status_code == 200
+    payload = cleared.json()
+    assert payload["status"] == "published"
+    assert payload["publish_status"] == "published"
+    assert payload["published_at"] is not None
+
+    with Session(engine) as session:
+        publish_job = session.exec(select(PublishJob).where(PublishJob.release_id == release["id"])).first()
+        assert publish_job is not None
+        assert publish_job.status == "published"
+
+
+def test_create_releases_uses_active_script_parts_only(client, monkeypatch: pytest.MonkeyPatch):
+    client, _engine = client
+    monkeypatch.setattr(
+        stories_api,
+        "_fetch_pixabay_assets",
+        lambda keywords, page=1: [
+            {
+                "remote_url": "https://example.com/fog.jpg",
+                "provider": "pixabay",
+                "provider_id": "asset-1",
+                "type": "image",
+                "orientation": "portrait",
+                "tags": ["fog", "night"],
+                "width": 1080,
+                "height": 1920,
+                "attribution": "tester",
+            }
+        ],
+    )
+
+    story = client.post(
+        "/stories",
+        json={
+            "title": "Active script coverage",
+            "body_md": "The room was quiet. Then the handle moved. I should have run.",
+        },
+    ).json()
+
+    first_script = client.post(f"/stories/{story['id']}/script")
+    assert first_script.status_code == 200
+
+    second_script = client.post(f"/stories/{story['id']}/script")
+    assert second_script.status_code == 200
+    assert second_script.json()["id"] != first_script.json()["id"]
+
+    parts = client.get(f"/stories/{story['id']}/parts")
+    assert parts.status_code == 200
+    active_part_ids = {part["id"] for part in parts.json()}
+    assert active_part_ids
+
+    assets = client.post(f"/stories/{story['id']}/assets/index").json()
+    bundle = client.post(
+        f"/stories/{story['id']}/asset-bundles",
+        json={"name": "Primary", "asset_refs": [assets[0]]},
+    )
+    assert bundle.status_code == 200
+    assert {
+        row["story_part_id"] for row in bundle.json()["part_asset_map"]
+    } == active_part_ids
+
+    releases = client.post(
+        f"/stories/{story['id']}/releases",
+        json={
+            "platforms": ["youtube"],
+            "preset_slug": "short-form",
+            "asset_bundle_id": bundle.json()["id"],
+        },
+    )
+    assert releases.status_code == 200
+
+
 def test_create_weekly_compilation(client):
     client, _engine = client
     story = client.post("/stories", json={"title": "Weekly", "body_md": "I ran. I hid. I survived."}).json()
@@ -347,7 +470,7 @@ def test_short_release_rejects_inactive_platform(client, monkeypatch: pytest.Mon
     monkeypatch.setattr(
         stories_api,
         "_fetch_pixabay_assets",
-        lambda keywords: [
+        lambda keywords, page=1: [
             {
                 "remote_url": "https://example.com/fog.jpg",
                 "provider": "pixabay",
@@ -383,7 +506,7 @@ def test_short_release_schedule_follows_existing_queue(client, monkeypatch: pyte
     monkeypatch.setattr(
         stories_api,
         "_fetch_pixabay_assets",
-        lambda keywords: [
+        lambda keywords, page=1: [
             {
                 "remote_url": "https://example.com/fog.jpg",
                 "provider": "pixabay",
@@ -452,7 +575,7 @@ def test_bundle_rejects_incomplete_part_asset_map(client, monkeypatch: pytest.Mo
     monkeypatch.setattr(
         stories_api,
         "_fetch_pixabay_assets",
-        lambda keywords: [
+        lambda keywords, page=1: [
             {
                 "remote_url": "https://example.com/fog.jpg",
                 "provider": "pixabay",

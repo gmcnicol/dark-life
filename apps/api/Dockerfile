@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY alembic.ini /app/alembic.ini
 COPY apps/api /app/apps/api
+COPY services/refinement /app/services/refinement
 COPY services/reddit_ingestor /app/services/reddit_ingestor
 COPY shared /app/shared
 

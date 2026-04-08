@@ -44,6 +44,7 @@ def render_short_job(
     output_root = Path(settings.OUTPUT_DIR) / "stories" / str(story["id"]) / "jobs" / str(job_id)
     output_root.mkdir(parents=True, exist_ok=True)
 
+    log_info("render_stage", job_id=job_id, story_id=story["id"], part_id=part["id"], stage="tts_start")
     voice_result = tts.synthesize_result(
         _part_text(context),
         story_id=story["id"],
@@ -51,7 +52,25 @@ def render_short_job(
         out_path=job_dir / "vo.wav",
         session=session,
     )
+    log_info(
+        "render_stage",
+        job_id=job_id,
+        story_id=story["id"],
+        part_id=part["id"],
+        stage="tts_done",
+        duration_ms=voice_result.duration_ms,
+        cache_hit=voice_result.cache_hit,
+    )
+    log_info("render_stage", job_id=job_id, story_id=story["id"], part_id=part["id"], stage="subtitles_start")
     subtitle_result = subtitles.generate_result(job_id=job_id, part_id=part["id"])
+    log_info(
+        "render_stage",
+        job_id=job_id,
+        story_id=story["id"],
+        part_id=part["id"],
+        stage="subtitles_done",
+        provider=subtitle_result.provider,
+    )
 
     selected_music = None
     if preset.get("music_enabled", True):
@@ -60,7 +79,17 @@ def render_short_job(
             policy = f"named:{bundle['music_track']}"
         selected_music = music.select_track(policy, required=False)
 
+    log_info("render_stage", job_id=job_id, story_id=story["id"], part_id=part["id"], stage="asset_materialize_start")
     materialized = materialize_asset(asset, output_dir=job_dir, session=session)
+    log_info(
+        "render_stage",
+        job_id=job_id,
+        story_id=story["id"],
+        part_id=part["id"],
+        stage="asset_materialize_done",
+        asset_cache_hit=materialized.cache_hit,
+        asset_path=str(materialized.path),
+    )
     render_input = RenderInput(
         job_id=job_id,
         story_id=story["id"],
@@ -88,7 +117,9 @@ def render_short_job(
         command_count=len(plan.commands),
         command_labels=plan.metadata.get("command_labels"),
     )
+    log_info("render_stage", job_id=job_id, story_id=story["id"], part_id=part["id"], stage="commands_start")
     run_commands(plan.commands, timeout_sec=settings.JOB_TIMEOUT_SEC)
+    log_info("render_stage", job_id=job_id, story_id=story["id"], part_id=part["id"], stage="commands_done")
 
     shutil.copyfile(subtitle_result.path, plan.artifacts.subtitle_path)
     duration_ms = ffmpeg.probe_duration_ms(plan.artifacts.video_path)
