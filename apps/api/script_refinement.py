@@ -308,6 +308,37 @@ def run_compat_script_generation(session: Session, story: Story) -> ScriptVersio
     return script
 
 
+def enqueue_compat_script_generation(session: Session, story: Story) -> ScriptBatch:
+    ensure_default_prompt_versions(session)
+    existing = session.exec(
+        select(ScriptBatch)
+        .where(ScriptBatch.story_id == story.id)
+        .order_by(ScriptBatch.id.desc())
+    ).all()
+    for batch in existing:
+        if (batch.config or {}).get("compat") and batch.status in {"queued", "processing", "generated", "concept_ready"}:
+            return batch
+
+    batch = ScriptBatch(
+        story_id=story.id,
+        status="queued",
+        candidate_count=1,
+        shortlisted_count=1,
+        prompt_version="gen_prompt_v1",
+        critic_version="critic_v1",
+        analyst_version="analyst_v1",
+        selection_policy_version="selection_policy_v1",
+        template_version="template_v1",
+        model_name=settings.OPENAI_SCRIPT_MODEL,
+        temperature=1.0,
+        config={"compat": True, "auto_activate": True},
+    )
+    session.add(batch)
+    session.flush()
+    _enqueue_refinement_job(session, batch=batch, kind=EXTRACT_JOB)
+    return batch
+
+
 @router.post("/stories/{story_id}/script-batches")
 def create_script_batch(
     story_id: int,
@@ -685,6 +716,17 @@ def update_refinement_job_status(
             _enqueue_refinement_job(session, batch=batch, kind=CRITIC_JOB)
         elif job.kind == CRITIC_JOB:
             ranked = score_script_versions(session, _batch_scripts(session, batch.id or 0), batch.shortlisted_count)
+            compat_mode = bool((batch.config or {}).get("compat"))
+            if compat_mode and ranked:
+                script = activate_script_version(session, ranked[0])
+                script.selection_state = "selected"
+                session.add(script)
+                story.status = "scripted"
+                session.add(story)
+                batch.result = {
+                    **(batch.result or {}),
+                    "script_version_id": script.id,
+                }
             batch.status = "ready_for_review"
             batch.result = {
                 **(batch.result or {}),
@@ -707,4 +749,4 @@ def update_refinement_job_status(
     return job
 
 
-__all__ = ["router", "run_compat_script_generation"]
+__all__ = ["enqueue_compat_script_generation", "router", "run_compat_script_generation"]

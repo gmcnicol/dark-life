@@ -1,3 +1,4 @@
+import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import { ClerkProvider } from "@clerk/react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -9,6 +10,8 @@ import "@/styles/globals.css";
 if (clerkEnabled && !clerkPublishableKey) {
   throw new Error("Add VITE_CLERK_PUBLISHABLE_KEY to the web environment.");
 }
+
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 const app = (
   <BrowserRouter>

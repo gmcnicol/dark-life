@@ -222,3 +222,5 @@ output/manifest/*
 render_queue/*
 !render_queue/.gitkeep
 .idea/
+local/xtts/*
+!local/xtts/.gitkeep

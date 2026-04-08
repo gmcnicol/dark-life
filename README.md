@@ -20,8 +20,9 @@ Legacy runtimes such as the old Flask app and `video_renderer` stack have been r
    - `ADMIN_API_TOKEN` with the same value
    - either `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`
    - or `TTS_PROVIDER=xtts_local` plus `XTTS_MODEL_DIR` and `XTTS_SPEAKER_WAV` for your local trained voice
+   - copy the XTTS runtime artifacts into `local/xtts/` before starting the renderer
    - if you keep multiple refined checkpoints in the same artifact directory, the renderer auto-selects the highest-step `best_model*.pth`
-   - when running XTTS through Docker, `XTTS_MOUNT_ROOT` set to a shared ancestor of those `XTTS_*` paths so the renderer container can see them at the same absolute paths
+   - the renderer container mounts repo-local XTTS assets from `local/xtts/` to `/opt/xtts`
    - `OPENAI_API_KEY` if you want OpenAI-backed script adaptation or Whisper API transcription
 2. Install dependencies:
    - `uv sync`

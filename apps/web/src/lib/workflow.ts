@@ -2,6 +2,7 @@ import type { StoryStatus } from "@dark-life/shared-types";
 
 export const WORKFLOW_STEPS: StoryStatus[] = [
   "ingested",
+  "generating_script",
   "scripted",
   "approved",
   "media_ready",
@@ -14,6 +15,7 @@ export const WORKFLOW_STEPS: StoryStatus[] = [
 
 export const STATUS_LABELS: Record<StoryStatus, string> = {
   ingested: "Ingested",
+  generating_script: "Generating Script",
   scripted: "Scripted",
   approved: "Approved",
   media_ready: "Media Ready",
@@ -27,17 +29,18 @@ export const STATUS_LABELS: Record<StoryStatus, string> = {
 };
 
 const STORY_STATUS_TRANSITIONS: Record<StoryStatus, StoryStatus[]> = {
-  ingested: ["scripted", "rejected", "errored"],
+  ingested: ["generating_script", "scripted", "rejected", "errored"],
+  generating_script: ["scripted", "rejected", "errored"],
   scripted: ["approved", "rejected", "errored"],
   approved: ["media_ready", "rejected", "errored"],
   media_ready: ["queued", "rejected", "errored"],
-  queued: ["rendering", "errored"],
-  rendering: ["rendered", "errored"],
-  rendered: ["publish_ready", "errored"],
-  publish_ready: ["published", "errored"],
-  published: [],
+  queued: ["rendering", "rejected", "errored"],
+  rendering: ["rendered", "rejected", "errored"],
+  rendered: ["publish_ready", "rejected", "errored"],
+  publish_ready: ["published", "rejected", "errored"],
+  published: ["rejected"],
   rejected: [],
-  errored: ["ingested", "scripted", "approved"],
+  errored: ["ingested", "generating_script", "scripted", "approved", "rejected"],
 };
 
 export function canTransitionStory(current: StoryStatus, next: StoryStatus): boolean {
@@ -56,7 +59,7 @@ export function canApproveStory(
 }
 
 export function canRejectStory(status: StoryStatus): boolean {
-  return canTransitionStory(status, "rejected");
+  return status !== "rejected" && canTransitionStory(status, "rejected");
 }
 
 export function canEditParts(status: StoryStatus, hasActiveScript: boolean): boolean {
@@ -117,6 +120,9 @@ export function statusTone(
   if (["approved", "media_ready", "queued", "rendering"].includes(status)) {
     return "accent";
   }
+  if (status === "generating_script") {
+    return "warning";
+  }
   if (status === "rejected" || status === "errored") {
     return "danger";
   }
@@ -131,7 +137,7 @@ export function nextWorkspaceRoute(
   storyId: number,
   hasBundle = false,
 ): string {
-  if (status === "ingested" || status === "scripted") {
+  if (status === "ingested" || status === "generating_script" || status === "scripted") {
     return `/story/${storyId}/review`;
   }
   if (status === "approved") {
@@ -147,4 +153,17 @@ export function nextWorkspaceRoute(
     return hasBundle ? `/story/${storyId}/jobs` : `/story/${storyId}/review`;
   }
   return `/story/${storyId}/review`;
+}
+
+export function findNextStoryWithStatus(
+  stories: Array<{ id: number; status: StoryStatus }>,
+  currentId: number,
+  targetStatus: StoryStatus,
+): number | null {
+  const currentIndex = stories.findIndex((story) => story.id === currentId);
+  const ordered =
+    currentIndex >= 0
+      ? [...stories.slice(currentIndex + 1), ...stories.slice(0, currentIndex)]
+      : stories;
+  return ordered.find((story) => story.id !== currentId && story.status === targetStatus)?.id ?? null;
 }

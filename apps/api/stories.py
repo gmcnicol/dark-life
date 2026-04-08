@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import mimetypes
+from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import urlparse
 import requests
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
+from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from shared.config import settings
 from shared.workflow import PublishApprovalStatus, PublishJobStatus, ReleaseStatus, RenderVariant, StoryStatus, can_transition_story
 
 from .db import get_session
-from .media_refs import bundle_asset_refs, bundle_part_asset_map, media_key, normalize_asset_refs, normalize_media_ref, ordered_part_asset_map
+from .media_refs import asset_to_media_ref, bundle_asset_refs, bundle_part_asset_map, media_key, normalize_asset_refs, normalize_media_ref, ordered_part_asset_map
 from .models import (
     Asset,
     AssetBundle,
@@ -62,7 +66,7 @@ from .pipeline import (
     generate_release_metadata,
     upsert_script,
 )
-from .script_refinement import run_compat_script_generation
+from .script_refinement import enqueue_compat_script_generation, run_compat_script_generation
 
 router = APIRouter(tags=["stories"])
 
@@ -137,6 +141,11 @@ class ReleaseCreate(BaseModel):
 class CompilationCreate(BaseModel):
     preset_slug: str = "weekly-full"
     platforms: list[str] = ["youtube"]
+
+
+class ScriptGenerationAccepted(BaseModel):
+    batch_id: int
+    status: str
 
 
 class PublishUpdate(BaseModel):
@@ -353,6 +362,162 @@ def _validate_bundle_payload(
     return ordered_refs, normalized_map
 
 
+def _remote_asset_suffix(asset: dict[str, Any], response: requests.Response | None = None) -> str:
+    remote_url = str(asset.get("remote_url") or "")
+    suffix = Path(urlparse(remote_url).path).suffix.lower()
+    if suffix:
+        return suffix
+    content_type = response.headers.get("content-type") if response is not None else None
+    if content_type:
+        guessed = mimetypes.guess_extension(content_type.split(";", 1)[0].strip())
+        if guessed:
+            return guessed
+    return ".jpg"
+
+
+def _resolve_pixabay_asset_url(provider_id: str) -> str | None:
+    if not settings.PIXABAY_API_KEY:
+        return None
+    response = requests.get(
+        "https://pixabay.com/api/",
+        params={
+            "key": settings.PIXABAY_API_KEY,
+            "id": provider_id,
+        },
+        timeout=12,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    hit = next(iter(payload.get("hits", [])), None)
+    if not isinstance(hit, dict):
+        return None
+    return hit.get("webformatURL") or hit.get("largeImageURL")
+
+
+def _download_bundle_asset(story_id: int, asset: dict[str, Any]) -> tuple[str | None, str | None]:
+    remote_url = asset.get("remote_url")
+    if not remote_url:
+        return asset.get("local_path"), None
+    resolved_remote_url = remote_url
+    response: requests.Response | None = None
+    try:
+        response = requests.get(remote_url, timeout=60, stream=True)
+        response.raise_for_status()
+    except requests.HTTPError:
+        provider = str(asset.get("provider") or "")
+        provider_id = str(asset.get("provider_id") or "")
+        if provider == "pixabay" and provider_id:
+            refreshed_url = _resolve_pixabay_asset_url(provider_id)
+            if refreshed_url and refreshed_url != remote_url:
+                resolved_remote_url = refreshed_url
+                response = requests.get(refreshed_url, timeout=60, stream=True)
+                response.raise_for_status()
+            else:
+                raise
+        else:
+            raise
+
+    if response is None:
+        raise FileNotFoundError("Asset download did not start")
+
+    bundle_dir = settings.VISUALS_DIR / "stories" / str(story_id) / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    stem = str(asset.get("provider_id") or asset.get("key") or "selected-media")
+    suffix = _remote_asset_suffix(asset, response=response)
+    target = bundle_dir / f"{stem}{suffix}"
+    tmp = target.with_suffix(f"{target.suffix}.tmp")
+    with tmp.open("wb") as handle:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                handle.write(chunk)
+        handle.flush()
+        handle.close()
+    tmp.replace(target)
+    return str(target), resolved_remote_url
+
+
+def _persist_bundle_assets(
+    session: Session,
+    story: Story,
+    *,
+    asset_refs: list[dict[str, Any]],
+    part_asset_map: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_refs = normalize_asset_refs(asset_refs)
+    existing_assets = session.exec(select(Asset).where(Asset.story_id == story.id)).all()
+    existing_by_provider = {
+        (asset.provider or "", asset.provider_id or ""): asset
+        for asset in existing_assets
+        if asset.provider_id
+    }
+    existing_by_remote = {
+        asset.remote_url: asset for asset in existing_assets if asset.remote_url
+    }
+    persisted_by_key: dict[str, dict[str, Any]] = {}
+
+    for ref in normalized_refs:
+        provider = str(ref.get("provider") or "")
+        provider_id = str(ref.get("provider_id") or "")
+        remote_url = ref.get("remote_url")
+        asset = existing_by_provider.get((provider, provider_id)) if provider_id else None
+        if asset is None and remote_url:
+            asset = existing_by_remote.get(remote_url)
+
+        local_path = ref.get("local_path")
+        refreshed_remote_url = remote_url
+        if provider == "pixabay" and remote_url:
+            local_path, refreshed_remote_url = _download_bundle_asset(story.id, ref)
+
+        if asset is None:
+            asset = Asset(
+                story_id=story.id,
+                type=ref.get("type") or "image",
+                remote_url=refreshed_remote_url,
+                local_path=local_path,
+                provider=provider or None,
+                provider_id=provider_id or None,
+                source="remote" if refreshed_remote_url else "local",
+                selected=True,
+                duration_ms=ref.get("duration_ms"),
+                width=ref.get("width"),
+                height=ref.get("height"),
+                orientation=ref.get("orientation"),
+                attribution=ref.get("attribution"),
+                tags=ref.get("tags"),
+            )
+            session.add(asset)
+            session.flush()
+        else:
+            asset.type = ref.get("type") or asset.type
+            asset.remote_url = refreshed_remote_url
+            asset.local_path = local_path or asset.local_path
+            asset.provider = provider or asset.provider
+            asset.provider_id = provider_id or asset.provider_id
+            asset.source = "remote" if asset.remote_url else "local"
+            asset.selected = True
+            asset.duration_ms = ref.get("duration_ms")
+            asset.width = ref.get("width")
+            asset.height = ref.get("height")
+            asset.orientation = ref.get("orientation")
+            asset.attribution = ref.get("attribution")
+            asset.tags = ref.get("tags")
+            session.add(asset)
+            session.flush()
+
+        persisted_ref = asset_to_media_ref(asset)
+        persisted_by_key[ref["key"]] = persisted_ref
+
+    persisted_map = [
+        {
+            "story_part_id": int(row["story_part_id"]),
+            "asset": persisted_by_key[row["asset"]["key"]],
+        }
+        for row in part_asset_map
+    ]
+    persisted_refs = [persisted_by_key[ref["key"]] for ref in normalized_refs if ref["key"] in persisted_by_key]
+    return persisted_refs, persisted_map
+
+
 def _sentence_spans(text: str) -> list[tuple[str, int, int]]:
     spans: list[tuple[str, int, int]] = []
     for match in SENTENCE_RE.finditer(text):
@@ -449,13 +614,16 @@ def list_scripts(story_id: int, session: Session = Depends(get_session)) -> list
     ).all()
 
 
-@router.post("/stories/{story_id}/script", response_model=ScriptVersionRead)
-def generate_script(story_id: int, session: Session = Depends(get_session)) -> ScriptVersion:
+@router.post("/stories/{story_id}/script", response_model=ScriptGenerationAccepted, status_code=status.HTTP_202_ACCEPTED)
+def generate_script(story_id: int, session: Session = Depends(get_session)) -> ScriptGenerationAccepted:
     story = _get_story(session, story_id)
-    script = run_compat_script_generation(session, story)
+    batch = enqueue_compat_script_generation(session, story)
+    story.status = StoryStatus.GENERATING_SCRIPT.value
+    story.updated_at = datetime.now(timezone.utc)
+    session.add(story)
     session.commit()
-    session.refresh(script)
-    return script
+    session.refresh(batch)
+    return ScriptGenerationAccepted(batch_id=batch.id or 0, status=batch.status)
 
 
 @router.get("/stories/{story_id}/parts", response_model=list[StoryPartRead])
@@ -630,12 +798,18 @@ def create_bundle(
         asset_refs=[asset.model_dump() if isinstance(asset, MediaReference) else asset for asset in bundle_in.asset_refs],
         part_asset_map=part_asset_rows,
     )
+    persisted_asset_refs, persisted_part_asset_map = _persist_bundle_assets(
+        session,
+        story,
+        asset_refs=asset_refs,
+        part_asset_map=part_asset_map,
+    )
     bundle = create_asset_bundle(
         session,
         story,
         name=bundle_in.name,
-        asset_refs=asset_refs,
-        part_asset_map=part_asset_map,
+        asset_refs=persisted_asset_refs,
+        part_asset_map=persisted_part_asset_map,
         variant=bundle_in.variant,
         music_policy=bundle_in.music_policy,
         music_track=bundle_in.music_track,
@@ -704,21 +878,29 @@ def list_releases(story_id: int, session: Session = Depends(get_session)) -> lis
 
 @router.get("/releases/queue", response_model=list[ReleaseRead])
 def release_queue(session: Session = Depends(get_session)) -> list[ReleaseRead]:
+    recent_published_cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.EARLY_SIGNAL_WINDOW_HOURS)
     releases = session.exec(
         select(Release)
         .where(
-            Release.status.in_(
-                [
-                    ReleaseStatus.READY.value,
-                    ReleaseStatus.APPROVED.value,
-                    ReleaseStatus.SCHEDULED.value,
-                    ReleaseStatus.PUBLISHING.value,
-                    ReleaseStatus.MANUAL_HANDOFF.value,
-                    ReleaseStatus.ERRORED.value,
-                ]
+            or_(
+                Release.status.in_(
+                    [
+                        ReleaseStatus.READY.value,
+                        ReleaseStatus.APPROVED.value,
+                        ReleaseStatus.SCHEDULED.value,
+                        ReleaseStatus.PUBLISHING.value,
+                        ReleaseStatus.MANUAL_HANDOFF.value,
+                        ReleaseStatus.ERRORED.value,
+                    ]
+                ),
+                and_(
+                    Release.status == ReleaseStatus.PUBLISHED.value,
+                    Release.published_at.is_not(None),
+                    Release.published_at >= recent_published_cutoff,
+                ),
             )
         )
-        .order_by(Release.id.asc())
+        .order_by(Release.publish_at.asc().nullslast(), Release.published_at.desc().nullslast(), Release.id.asc())
     ).all()
     return _serialize_releases(session, releases)
 

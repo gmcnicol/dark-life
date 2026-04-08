@@ -7,6 +7,7 @@ from enum import StrEnum
 
 class StoryStatus(StrEnum):
     INGESTED = "ingested"
+    GENERATING_SCRIPT = "generating_script"
     SCRIPTED = "scripted"
     APPROVED = "approved"
     MEDIA_READY = "media_ready"
@@ -69,17 +70,18 @@ class AssetKind(StrEnum):
 
 
 STORY_STATUS_TRANSITIONS: dict[StoryStatus, set[StoryStatus]] = {
-    StoryStatus.INGESTED: {StoryStatus.SCRIPTED, StoryStatus.REJECTED, StoryStatus.ERRORED},
+    StoryStatus.INGESTED: {StoryStatus.GENERATING_SCRIPT, StoryStatus.SCRIPTED, StoryStatus.REJECTED, StoryStatus.ERRORED},
+    StoryStatus.GENERATING_SCRIPT: {StoryStatus.SCRIPTED, StoryStatus.REJECTED, StoryStatus.ERRORED},
     StoryStatus.SCRIPTED: {StoryStatus.APPROVED, StoryStatus.REJECTED, StoryStatus.ERRORED},
     StoryStatus.APPROVED: {StoryStatus.MEDIA_READY, StoryStatus.REJECTED, StoryStatus.ERRORED},
     StoryStatus.MEDIA_READY: {StoryStatus.QUEUED, StoryStatus.REJECTED, StoryStatus.ERRORED},
-    StoryStatus.QUEUED: {StoryStatus.RENDERING, StoryStatus.ERRORED},
-    StoryStatus.RENDERING: {StoryStatus.RENDERED, StoryStatus.ERRORED},
-    StoryStatus.RENDERED: {StoryStatus.PUBLISH_READY, StoryStatus.ERRORED},
-    StoryStatus.PUBLISH_READY: {StoryStatus.PUBLISHED, StoryStatus.ERRORED},
-    StoryStatus.PUBLISHED: set(),
+    StoryStatus.QUEUED: {StoryStatus.RENDERING, StoryStatus.REJECTED, StoryStatus.ERRORED},
+    StoryStatus.RENDERING: {StoryStatus.RENDERED, StoryStatus.REJECTED, StoryStatus.ERRORED},
+    StoryStatus.RENDERED: {StoryStatus.PUBLISH_READY, StoryStatus.REJECTED, StoryStatus.ERRORED},
+    StoryStatus.PUBLISH_READY: {StoryStatus.PUBLISHED, StoryStatus.REJECTED, StoryStatus.ERRORED},
+    StoryStatus.PUBLISHED: {StoryStatus.REJECTED},
     StoryStatus.REJECTED: set(),
-    StoryStatus.ERRORED: {StoryStatus.INGESTED, StoryStatus.SCRIPTED, StoryStatus.APPROVED},
+    StoryStatus.ERRORED: {StoryStatus.INGESTED, StoryStatus.GENERATING_SCRIPT, StoryStatus.SCRIPTED, StoryStatus.APPROVED, StoryStatus.REJECTED},
 }
 
 

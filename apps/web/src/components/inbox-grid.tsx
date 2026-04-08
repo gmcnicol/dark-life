@@ -1,40 +1,144 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-quartz.css";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AgGridReact } from "ag-grid-react";
+import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { useNavigate } from "react-router-dom";
-import type { Story } from "@/lib/stories";
-import { STATUS_LABELS, nextWorkspaceRoute, statusTone } from "@/lib/workflow";
-import { cn } from "@/lib/utils";
+import { updateStoryStatus, type Story } from "@/lib/stories";
+import { STATUS_LABELS, nextWorkspaceRoute } from "@/lib/workflow";
 import { EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
+
+type InboxRow = Story & {
+  storyLabel: string;
+  destinationLabel: string;
+  sourceLabel: string;
+  authorLabel: string;
+  redditCreatedLabel: string;
+};
+
+const DESTINATION_LABELS: Record<string, string> = {
+  ingested: "Review",
+  generating_script: "Generating",
+  scripted: "Review",
+  approved: "Media",
+  media_ready: "Scheduled",
+  queued: "Published",
+  rendering: "Published",
+  rendered: "Published",
+  publish_ready: "Published",
+  published: "Published",
+  rejected: "Rejected",
+  errored: "Review",
+};
+
+const baseColumns: Array<ColDef<InboxRow>> = [
+  {
+    field: "id",
+    headerName: "ID",
+    width: 88,
+    pinned: "left",
+    suppressMovable: true,
+    sort: "desc",
+    valueFormatter: ({ value }) => `#${value}`,
+    cellClass: "inbox-grid__id",
+  },
+  {
+    field: "storyLabel",
+    headerName: "Story",
+    minWidth: 360,
+    flex: 2.4,
+    tooltipField: "title",
+    cellRenderer: ({ data }: { data?: InboxRow }) =>
+      data ? (
+        <div className="flex min-w-0 flex-col py-1">
+          <span className="truncate text-sm font-semibold text-white">{data.storyLabel}</span>
+        </div>
+      ) : null,
+  },
+  {
+    field: "status",
+    headerName: "Status",
+    width: 136,
+    cellRenderer: ({ data }: { data?: InboxRow }) =>
+      data ? (
+        <StatusBadge tone={badgeTone(data.status)} className="px-2.5 py-1 text-[0.62rem]">
+          {STATUS_LABELS[data.status]}
+        </StatusBadge>
+      ) : null,
+  },
+  {
+    field: "destinationLabel",
+    headerName: "Next",
+    width: 132,
+    cellClass: "inbox-grid__next",
+  },
+  {
+    field: "authorLabel",
+    headerName: "Author",
+    minWidth: 160,
+    flex: 1,
+    cellClass: "inbox-grid__muted",
+  },
+  {
+    field: "redditCreatedLabel",
+    headerName: "Reddit",
+    minWidth: 168,
+    width: 168,
+    cellClass: "inbox-grid__muted",
+  },
+  {
+    field: "sourceLabel",
+    headerName: "Source",
+    minWidth: 170,
+    flex: 1.1,
+    cellClass: "inbox-grid__muted",
+  },
+];
 
 export default function InboxGrid({ stories }: { stories: Story[] }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
+  const rejectStory = useMutation({
+    mutationFn: (storyId: number) => updateStoryStatus(storyId, "rejected"),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["stories"] });
+    },
+  });
 
-  const filteredStories = useMemo(() => {
+  const filteredStories = useMemo<InboxRow[]>(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) {
-      return stories;
-    }
-
-    return stories.filter((story) => {
-      const haystack = `${story.title} ${story.author ?? ""} ${story.source_url ?? ""} ${story.id}`.toLowerCase();
-      return haystack.includes(needle);
-    });
+    return stories
+      .filter((story) => {
+        if (!needle) {
+          return true;
+        }
+        const haystack = `${story.title} ${story.author ?? ""} ${story.source_url ?? ""} ${story.id}`.toLowerCase();
+        return haystack.includes(needle);
+      })
+      .map((story) => ({
+        ...story,
+        storyLabel: story.title,
+        destinationLabel: DESTINATION_LABELS[story.status] ?? STATUS_LABELS[story.status],
+        sourceLabel: story.source_url ? safeHostname(story.source_url) : "Local source",
+        authorLabel: story.author?.trim() || "Unknown author",
+        redditCreatedLabel: formatRedditCreated(story.created_utc),
+      }));
   }, [query, stories]);
 
   useEffect(() => {
-    setSelectedIndex((current) => {
-      if (filteredStories.length === 0) {
-        return -1;
-      }
-      if (current < 0) {
-        return -1;
-      }
-      return Math.min(current, filteredStories.length - 1);
-    });
-  }, [filteredStories.length]);
+    if (filteredStories.length === 0) {
+      setSelectedStoryId(null);
+      return;
+    }
+    if (!filteredStories.some((story) => story.id === selectedStoryId)) {
+      setSelectedStoryId(filteredStories[0]?.id ?? null);
+    }
+  }, [filteredStories, selectedStoryId]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -44,28 +148,32 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
       }
       if (event.key === "j") {
         event.preventDefault();
-        setSelectedIndex((current) =>
-          filteredStories.length === 0
-            ? -1
-            : current < 0
-              ? 0
-              : Math.min(current + 1, filteredStories.length - 1),
-        );
+        setSelectedStoryId((current) => {
+          if (filteredStories.length === 0) {
+            return null;
+          }
+          const currentIndex = filteredStories.findIndex((story) => story.id === current);
+          if (currentIndex < 0) {
+            return filteredStories[0]?.id ?? null;
+          }
+          return filteredStories[Math.min(currentIndex + 1, filteredStories.length - 1)]?.id ?? current;
+        });
       }
       if (event.key === "k") {
         event.preventDefault();
-        setSelectedIndex((current) => {
+        setSelectedStoryId((current) => {
           if (filteredStories.length === 0) {
-            return -1;
+            return null;
           }
-          if (current <= 0) {
-            return 0;
+          const currentIndex = filteredStories.findIndex((story) => story.id === current);
+          if (currentIndex <= 0) {
+            return filteredStories[0]?.id ?? null;
           }
-          return current - 1;
+          return filteredStories[currentIndex - 1]?.id ?? current;
         });
       }
       if (event.key === "Enter") {
-        const story = filteredStories[selectedIndex];
+        const story = filteredStories.find((item) => item.id === selectedStoryId);
         if (story) {
           navigate(nextWorkspaceRoute(story.status, story.id, Boolean(story.active_asset_bundle_id)));
         }
@@ -74,20 +182,60 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [filteredStories, navigate, selectedIndex]);
+  }, [filteredStories, navigate, selectedStoryId]);
 
-  const openStory = (story: Story) => {
-    navigate(nextWorkspaceRoute(story.status, story.id, Boolean(story.active_asset_bundle_id)));
-  };
+  const columnDefs = useMemo<Array<ColDef<InboxRow>>>(() => {
+    return [
+      ...baseColumns,
+      {
+        colId: "actions",
+        headerName: "Actions",
+        width: 180,
+        pinned: "right",
+        sortable: false,
+        resizable: false,
+        suppressMovable: true,
+        cellRenderer: ({ data }: { data?: InboxRow }) =>
+          data ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  navigate(nextWorkspaceRoute(data.status, data.id, Boolean(data.active_asset_bundle_id)));
+                }}
+                className="rounded-full border border-white/12 bg-white/6 px-3 py-1.5 text-xs font-semibold text-white transition hover:border-cyan-300/35 hover:bg-cyan-300/10"
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  rejectStory.mutate(data.id);
+                }}
+                disabled={data.status === "rejected" || rejectStory.isPending}
+                className="rounded-full border border-rose-300/15 bg-rose-300/[0.08] px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:border-rose-300/30 hover:bg-rose-300/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Reject
+              </button>
+            </div>
+          ) : null,
+      },
+    ];
+  }, [navigate, rejectStory]);
 
   return (
-    <Panel className="space-y-5">
+    <Panel className="space-y-3 p-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <SectionHeading
-          eyebrow="Active queue"
-          title="Operator inbox"
-          description="Use `j`, `k`, and `Enter` to move through the queue quickly, or click straight into the right workflow stage."
-        />
+        <div className="space-y-2">
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
+            Active queue
+          </p>
+          <p className="text-sm leading-6 text-[var(--text-soft)]">
+            Sort columns, scan rows, move with `j` and `k`, then hit `Enter` to jump into the right stage.
+          </p>
+        </div>
         <div className="flex w-full max-w-md flex-col gap-2">
           <label className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
             Quick filter
@@ -97,57 +245,119 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Filter by story, author, source, or id"
-            className="w-full rounded-[1.15rem] border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
+            className="w-full rounded-[1rem] border border-white/10 bg-black/20 px-4 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
           />
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {filteredStories.length === 0 ? (
-          <div className="md:col-span-2 xl:col-span-3">
-            <EmptyState
-              title="No stories match this filter"
-              description="Try a broader status filter or remove some keywords. The inbox only shows stories that still require action."
+      {filteredStories.length === 0 ? (
+        <EmptyState
+          title="No stories match this filter"
+          description="Try a broader status filter or remove some keywords. The inbox only shows stories that still require action."
+        />
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusBadge tone="neutral">{filteredStories.length} rows</StatusBadge>
+            <StatusBadge tone="warning">
+              {(stories.filter((story) => story.status === "ingested").length) + (stories.filter((story) => story.status === "generating_script").length) + (stories.filter((story) => story.status === "scripted").length)} waiting for script
+            </StatusBadge>
+            <StatusBadge tone="accent">
+              {(stories.filter((story) => story.status === "approved").length) + (stories.filter((story) => story.status === "media_ready").length)} ready for media
+            </StatusBadge>
+            <p className="text-sm text-[var(--text-soft)]">
+              Click a row to open its current workspace stage.
+            </p>
+          </div>
+
+          <div
+            className="ag-theme-quartz-dark inbox-grid-theme h-[68vh] min-h-[28rem] overflow-hidden rounded-[1.35rem] border border-white/10"
+            style={
+              {
+                width: "100%",
+                ["--ag-background-color" as string]: "rgba(10, 14, 22, 0.94)",
+                ["--ag-foreground-color" as string]: "rgb(241, 245, 249)",
+                ["--ag-header-background-color" as string]: "rgba(255, 255, 255, 0.03)",
+                ["--ag-header-foreground-color" as string]: "rgba(226, 232, 240, 0.74)",
+                ["--ag-row-hover-color" as string]: "rgba(56, 189, 248, 0.09)",
+                ["--ag-selected-row-background-color" as string]: "rgba(56, 189, 248, 0.16)",
+                ["--ag-border-color" as string]: "rgba(255, 255, 255, 0.08)",
+                ["--ag-row-border-color" as string]: "rgba(255, 255, 255, 0.06)",
+                ["--ag-odd-row-background-color" as string]: "rgba(255, 255, 255, 0.015)",
+                ["--ag-cell-horizontal-border" as string]: "transparent",
+                ["--ag-wrapper-border-radius" as string]: "1.35rem",
+                ["--ag-font-family" as string]: "inherit",
+              } as CSSProperties
+            }
+          >
+            <AgGridReact<InboxRow>
+              theme={"legacy"}
+              rowData={filteredStories}
+              columnDefs={columnDefs}
+              rowHeight={48}
+              headerHeight={38}
+              animateRows
+              rowSelection={{ mode: "singleRow", enableClickSelection: true, checkboxes: false }}
+              suppressCellFocus
+              suppressHorizontalScroll
+              defaultColDef={{
+                sortable: true,
+                resizable: true,
+              }}
+              onRowClicked={(event: RowClickedEvent<InboxRow>) => {
+                if (event.data?.id) {
+                  setSelectedStoryId(event.data.id);
+                  navigate(nextWorkspaceRoute(event.data.status, event.data.id, Boolean(event.data.active_asset_bundle_id)));
+                }
+              }}
+              rowClassRules={{
+                "ag-row-selected": (params) => params.data?.id === selectedStoryId,
+              }}
+              getRowId={({ data }) => `${data.id}`}
             />
           </div>
-        ) : (
-          filteredStories.map((story, index) => (
-            <button
-              key={story.id}
-              type="button"
-              onClick={() => openStory(story)}
-              className={cn(
-                "rounded-[1.5rem] border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50",
-                index === selectedIndex
-                  ? "border-cyan-300/35 bg-cyan-300/[0.08] shadow-[0_16px_40px_rgba(34,211,238,0.12)]"
-                  : "border-white/8 bg-white/[0.03] hover:-translate-y-0.5 hover:border-white/14 hover:bg-white/[0.05]",
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-2">
-                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
-                    Story #{story.id}
-                  </p>
-                  <h3 className="text-lg font-semibold leading-6 text-white">{story.title}</h3>
-                </div>
-                <StatusBadge tone={statusTone(story.status)}>{STATUS_LABELS[story.status]}</StatusBadge>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-3 text-sm text-[var(--text-soft)]">
-                <span>{story.author || "Unknown author"}</span>
-                <span>Next: {STATUS_LABELS[story.status]}</span>
-              </div>
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <p className="text-sm text-[var(--text-soft)]">
-                  {story.source_url
-                    ? new URL(story.source_url).hostname.replace(/^www\./, "")
-                    : "Local source"}
-                </p>
-                <span className="text-sm font-semibold text-cyan-100">Open</span>
-              </div>
-            </button>
-          ))
-        )}
-      </div>
+        </div>
+      )}
     </Panel>
   );
+}
+
+function safeHostname(value: string) {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return value;
+  }
+}
+
+function badgeTone(status: InboxRow["status"]) {
+  if (status === "approved" || status === "media_ready" || status === "queued") {
+    return "accent" as const;
+  }
+  if (status === "published") {
+    return "success" as const;
+  }
+  if (status === "rejected" || status === "errored") {
+    return "danger" as const;
+  }
+  if (status === "generating_script" || status === "scripted") {
+    return "warning" as const;
+  }
+  return "neutral" as const;
+}
+
+function formatRedditCreated(value?: string | null) {
+  if (!value) {
+    return "n/a";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "n/a";
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }

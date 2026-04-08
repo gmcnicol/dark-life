@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 from shared.config import settings
 from shared.workflow import PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus, RenderVariant
 
-from .models import PublishJob, Release, ReleaseRead, RenderArtifact, Story, StudioSetting
+from .models import PublishJob, Release, ReleaseEarlySignalRead, ReleaseRead, RenderArtifact, Story, StudioSetting
 
 
 AUTOMATED_PLATFORMS = {"youtube", "instagram"}
@@ -152,6 +152,7 @@ def release_read(session: Session, release: Release) -> ReleaseRead:
     payload["artifact_path"] = artifact.video_path if artifact else None
     payload["signed_asset_url"] = build_signed_artifact_url(release_id=release.id) if artifact and release.id else None
     payload["publish_job_id"] = publish_job.id if publish_job else None
+    payload["early_signal"] = _build_release_early_signal(release)
     return ReleaseRead.model_validate(payload)
 
 
@@ -236,6 +237,28 @@ def next_daily_publish_slot(after: datetime | None = None) -> datetime:
     return slot
 
 
+def _shorts_publish_slots() -> list[tuple[int, int]]:
+    slots: list[tuple[int, int]] = []
+    raw = settings.SHORTS_PUBLISH_SLOTS_UTC.strip()
+    if raw:
+        for value in raw.split(","):
+            chunk = value.strip()
+            if not chunk:
+                continue
+            try:
+                hour_text, minute_text = chunk.split(":", 1)
+                hour = int(hour_text)
+                minute = int(minute_text)
+            except ValueError as exc:
+                raise ValueError(f"Invalid SHORTS_PUBLISH_SLOTS_UTC entry: {chunk!r}") from exc
+            if hour not in range(24) or minute not in range(60):
+                raise ValueError(f"Invalid SHORTS_PUBLISH_SLOTS_UTC time: {chunk!r}")
+            slots.append((hour, minute))
+    if not slots:
+        slots.append((settings.SHORTS_PUBLISH_HOUR_UTC, settings.SHORTS_PUBLISH_MINUTE_UTC))
+    return sorted(set(slots))
+
+
 def next_weekday_publish_slot(
     *,
     after: datetime | None = None,
@@ -286,8 +309,87 @@ def short_release_schedule(session: Session, *, count: int, now: datetime | None
     platforms = active_publish_platforms(session)
     anchor = _latest_release_time(session, variant=RenderVariant.SHORT.value, platforms=platforms)
     base = max([candidate for candidate in [anchor, now, datetime.now(timezone.utc)] if candidate is not None])
-    first_slot = next_daily_publish_slot(base)
-    return [first_slot + timedelta(days=index) for index in range(count)]
+    slots = _shorts_publish_slots()
+    scheduled: list[datetime] = []
+    cursor = base.astimezone(timezone.utc)
+    while len(scheduled) < count:
+        day_start = cursor.replace(hour=0, minute=0, second=0, microsecond=0)
+        for hour, minute in slots:
+            slot = day_start.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if slot > cursor:
+                scheduled.append(slot)
+                if len(scheduled) >= count:
+                    break
+        cursor = day_start + timedelta(days=1)
+    return scheduled
+
+
+def _release_metrics_payload(release: Release) -> dict[str, float]:
+    metadata = release.provider_metadata or {}
+    source = metadata.get("mock_metrics") if isinstance(metadata.get("mock_metrics"), dict) else metadata
+    if not isinstance(source, dict):
+        source = {}
+    return {
+        "impressions": float(source.get("impressions") or source.get("views") or 0.0),
+        "views": float(source.get("views") or 0.0),
+        "avg_view_duration": float(source.get("avg_view_duration") or 0.0),
+        "percent_viewed": float(source.get("percent_viewed") or 0.0),
+        "completion_rate": float(source.get("completion_rate") or 0.0),
+        "likes": float(source.get("likes") or 0.0),
+        "comments": float(source.get("comments") or 0.0),
+        "shares": float(source.get("shares") or 0.0),
+        "subs_gained": float(source.get("subs_gained") or 0.0),
+    }
+
+
+def _build_release_early_signal(release: Release) -> ReleaseEarlySignalRead | None:
+    if release.variant != RenderVariant.SHORT.value or release.status != ReleaseStatus.PUBLISHED.value:
+        return None
+    anchor = release.published_at
+    if anchor is None:
+        return None
+
+    metrics = _release_metrics_payload(release)
+    now = datetime.now(timezone.utc)
+    hours_since = max(0.0, (now - anchor.astimezone(timezone.utc)).total_seconds() / 3600)
+    views = metrics["views"]
+    percent_viewed = metrics["percent_viewed"]
+    completion_rate = metrics["completion_rate"]
+    likes = metrics["likes"]
+    comments = metrics["comments"]
+    shares = metrics["shares"]
+
+    retention_score = (percent_viewed * 0.55) + (completion_rate * 0.45)
+    interaction_score = ((likes + comments * 2 + shares * 3) / max(views, 1.0)) * 100 if views > 0 else 0.0
+    velocity_score = min(100.0, views / 40.0)
+    score = round(retention_score * 0.45 + interaction_score * 0.3 + velocity_score * 0.25, 2)
+
+    if hours_since < settings.EARLY_SIGNAL_WINDOW_HOURS and views <= 0:
+        state = "monitor"
+        action = "Watch for 4h signal"
+        summary = "Recently published. Not enough early data yet."
+    elif score >= 55 or (views >= 250 and shares >= 3) or (comments >= 5 and percent_viewed >= 55):
+        state = "winner"
+        action = "Develop follow-up / series"
+        summary = "Early traction is strong enough to justify a rewrite, re-angle, or series follow-up."
+    elif hours_since >= settings.EARLY_SIGNAL_WINDOW_HOURS and score < 28:
+        state = "flat"
+        action = "Ignore and move on"
+        summary = "The first window is flat. Leave it alone and spend effort on the next post."
+    else:
+        state = "monitor"
+        action = "Watch for 4h signal" if hours_since < settings.EARLY_SIGNAL_WINDOW_HOURS else "Monitor, then decide"
+        summary = "Mixed early signal. Let it breathe, then decide if it deserves a follow-up."
+
+    return ReleaseEarlySignalRead(
+        window_hours=settings.EARLY_SIGNAL_WINDOW_HOURS,
+        state=state,
+        score=score,
+        recommended_action=action,
+        summary=summary,
+        evaluated_at=anchor.astimezone(timezone.utc) + timedelta(hours=settings.EARLY_SIGNAL_WINDOW_HOURS),
+        metrics=metrics,
+    )
 
 
 def weekly_compilation_schedule(

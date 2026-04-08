@@ -18,6 +18,9 @@ import requests
 from shared.config import settings
 from shared.logging import log_error, log_info
 
+XTTS_MAX_WORDS_PER_CHUNK = 45
+XTTS_MAX_CHARS_PER_CHUNK = 260
+
 
 @dataclass(frozen=True)
 class SynthesisResult:
@@ -291,6 +294,63 @@ def _synthesize_xtts_local(
     xtts_paths: XttsPaths,
 ) -> None:
     tmp = cache_path.with_suffix(".xtts.tmp.wav")
+    chunks = _split_text_for_xtts(text)
+    log_info(
+        "xtts_prepare",
+        story_id=story_id,
+        part_id=part_id,
+        chunk_count=len(chunks),
+        chars=len(text),
+        words=len(text.split()),
+    )
+    try:
+        if len(chunks) == 1:
+            _run_xtts_command(
+                text=chunks[0],
+                out_path=tmp,
+                xtts_paths=xtts_paths,
+                story_id=story_id,
+                part_id=part_id,
+            )
+        else:
+            chunk_paths: list[Path] = []
+            for index, chunk in enumerate(chunks, start=1):
+                chunk_path = cache_path.with_suffix(f".xtts.chunk-{index}.wav")
+                _run_xtts_command(
+                    text=chunk,
+                    out_path=chunk_path,
+                    xtts_paths=xtts_paths,
+                    story_id=story_id,
+                    part_id=part_id,
+                    chunk_index=index,
+                    chunk_count=len(chunks),
+                )
+                chunk_paths.append(chunk_path)
+            _concat_wavs(chunk_paths, tmp)
+            for chunk_path in chunk_paths:
+                chunk_path.unlink(missing_ok=True)
+
+        _ensure_pcm(tmp, cache_path)
+        tmp.unlink(missing_ok=True)
+        log_info("tts_cache_store", provider="xtts_local", story_id=story_id, part_id=part_id, path=str(cache_path))
+    except subprocess.CalledProcessError as exc:
+        log_error("tts_error", provider="xtts_local", error=str(exc), stderr=exc.stderr[-800:] if exc.stderr else "")
+        raise RuntimeError("XTTS synthesis failed") from exc
+    except Exception as exc:
+        log_error("tts_error", provider="xtts_local", error=str(exc))
+        raise
+
+
+def _run_xtts_command(
+    *,
+    text: str,
+    out_path: Path,
+    xtts_paths: XttsPaths,
+    story_id: str | int,
+    part_id: str | int,
+    chunk_index: int | None = None,
+    chunk_count: int | None = None,
+) -> None:
     cmd = [
         sys.executable,
         "-m",
@@ -312,7 +372,7 @@ def _synthesize_xtts_local(
         "--text",
         text,
         "--out",
-        str(tmp),
+        str(out_path),
     ]
     if xtts_paths.speaker_file_path:
         cmd.extend(["--speaker-file-path", str(xtts_paths.speaker_file_path)])
@@ -329,27 +389,127 @@ def _synthesize_xtts_local(
         speaker_file=str(xtts_paths.speaker_file_path) if xtts_paths.speaker_file_path else None,
         speaker_wav=str(xtts_paths.speaker_wav),
         device=settings.XTTS_DEVICE,
+        chunk_index=chunk_index,
+        chunk_count=chunk_count,
     )
+    subprocess.run(
+        cmd,
+        cwd=str(Path(settings.BASE_DIR)),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+        timeout=max(settings.JOB_TIMEOUT_SEC, 60),
+        env=env,
+    )
+
+
+def _split_text_for_xtts(text: str) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return [""]
+
+    sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", normalized) if segment.strip()]
+    if not sentences:
+        sentences = [normalized]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_words = 0
+    current_chars = 0
+
+    for sentence in sentences:
+        sentence_words = _estimate_xtts_token_load(sentence)
+        sentence_chars = len(sentence)
+
+        if sentence_words > XTTS_MAX_WORDS_PER_CHUNK or sentence_chars > XTTS_MAX_CHARS_PER_CHUNK:
+            if current:
+                chunks.append(" ".join(current).strip())
+                current = []
+                current_words = 0
+                current_chars = 0
+            chunks.extend(_split_long_sentence(sentence))
+            continue
+
+        would_exceed = (
+            current
+            and (
+                current_words + sentence_words > XTTS_MAX_WORDS_PER_CHUNK
+                or current_chars + 1 + sentence_chars > XTTS_MAX_CHARS_PER_CHUNK
+            )
+        )
+        if would_exceed:
+            chunks.append(" ".join(current).strip())
+            current = [sentence]
+            current_words = sentence_words
+            current_chars = sentence_chars
+            continue
+
+        current.append(sentence)
+        current_words += sentence_words
+        current_chars += sentence_chars + (1 if current_chars else 0)
+
+    if current:
+        chunks.append(" ".join(current).strip())
+
+    return [chunk for chunk in chunks if chunk]
+
+
+def _split_long_sentence(sentence: str) -> list[str]:
+    words = sentence.split()
+    chunks: list[str] = []
+    current: list[str] = []
+    current_chars = 0
+    current_load = 0
+    for word in words:
+        next_chars = current_chars + len(word) + (1 if current else 0)
+        word_load = _estimate_xtts_token_load(word)
+        if current and (current_load + word_load > XTTS_MAX_WORDS_PER_CHUNK or next_chars > XTTS_MAX_CHARS_PER_CHUNK):
+            chunks.append(" ".join(current))
+            current = [word]
+            current_chars = len(word)
+            current_load = word_load
+            continue
+        current.append(word)
+        current_chars = next_chars
+        current_load += word_load
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
+
+
+def _estimate_xtts_token_load(text: str) -> int:
+    words = len(re.findall(r"[A-Za-z0-9'’-]+", text))
+    punctuation = len(re.findall(r"[.,!?;:()\"-]", text))
+    long_word_penalty = sum(max(0, len(word) - 8) // 4 for word in re.findall(r"[A-Za-z0-9'’-]+", text))
+    return max(1, words + punctuation + long_word_penalty)
+
+
+def _concat_wavs(paths: list[Path], out_path: Path) -> None:
+    concat_file = out_path.with_suffix(".concat.txt")
+    concat_file.write_text("".join(f"file '{path.as_posix()}'\n" for path in paths), encoding="utf-8")
     try:
         subprocess.run(
-            cmd,
-            cwd=str(Path(settings.BASE_DIR)),
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_file),
+                "-c",
+                "copy",
+                str(out_path),
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             check=True,
-            timeout=max(settings.JOB_TIMEOUT_SEC, 60),
-            env=env,
         )
-        _ensure_pcm(tmp, cache_path)
-        tmp.unlink(missing_ok=True)
-        log_info("tts_cache_store", provider="xtts_local", story_id=story_id, part_id=part_id, path=str(cache_path))
-    except subprocess.CalledProcessError as exc:
-        log_error("tts_error", provider="xtts_local", error=str(exc), stderr=exc.stderr[-800:] if exc.stderr else "")
-        raise RuntimeError("XTTS synthesis failed") from exc
-    except Exception as exc:
-        log_error("tts_error", provider="xtts_local", error=str(exc))
-        raise
+    finally:
+        concat_file.unlink(missing_ok=True)
 
 
 def synthesize(

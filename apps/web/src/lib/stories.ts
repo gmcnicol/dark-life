@@ -13,6 +13,7 @@ export interface Story {
   status: StoryStatus;
   source_url?: string | null;
   author?: string | null;
+  created_utc?: string | null;
   active_script_version_id?: number | null;
   active_asset_bundle_id?: number | null;
 }
@@ -132,6 +133,15 @@ export interface Release {
   artifact_path?: string | null;
   signed_asset_url?: string | null;
   publish_job_id?: number | null;
+  early_signal?: {
+    window_hours: number;
+    state: "monitor" | "flat" | "winner" | string;
+    score: number;
+    recommended_action: string;
+    summary: string;
+    evaluated_at?: string | null;
+    metrics: Record<string, number>;
+  } | null;
 }
 
 export interface Compilation {
@@ -165,6 +175,10 @@ export interface Job {
   status: JobStatus;
   payload?: Record<string, unknown> | null;
   result?: Record<string, unknown> | null;
+  error_class?: string | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface StoryOverview {
@@ -250,6 +264,11 @@ export interface PromptVersion {
   notes?: string | null;
 }
 
+export interface ScriptGenerationRequest {
+  batch_id: number;
+  status: string;
+}
+
 export interface RedditIngestJob {
   id: number;
   subreddit: string;
@@ -304,8 +323,8 @@ export async function updateStoryStatus(id: number, status: StoryStatus): Promis
   });
 }
 
-export async function generateScript(id: number): Promise<ScriptVersion> {
-  return apiFetch<ScriptVersion>(`/stories/${id}/script`, { method: "POST" });
+export async function generateScript(id: number): Promise<ScriptGenerationRequest> {
+  return apiFetch<ScriptGenerationRequest>(`/stories/${id}/script`, { method: "POST" });
 }
 
 export async function createScriptBatch(

@@ -36,6 +36,7 @@ export default function PublishRoute() {
   const [platformFilter, setPlatformFilter] = useState<string>("all");
 
   const releases = releasesQuery.data ?? [];
+  const now = new Date();
   const platforms = useMemo(
     () => Array.from(new Set(releases.map((release) => release.platform))).sort(),
     [releases],
@@ -54,8 +55,21 @@ export default function PublishRoute() {
         (item) => item.status === "ready" || item.status === "approved",
       ).length,
       manualHandoff: filteredReleases.filter((item) => item.status === "manual_handoff").length,
+      scheduledToday: filteredReleases.filter((item) => {
+        if (!item.publish_at) {
+          return false;
+        }
+        const date = new Date(item.publish_at);
+        return (
+          date.getUTCFullYear() === now.getUTCFullYear() &&
+          date.getUTCMonth() === now.getUTCMonth() &&
+          date.getUTCDate() === now.getUTCDate()
+        );
+      }).length,
+      winners: filteredReleases.filter((item) => item.early_signal?.state === "winner").length,
+      flats: filteredReleases.filter((item) => item.early_signal?.state === "flat").length,
     }),
-    [filteredReleases],
+    [filteredReleases, now],
   );
   const selectedPlatformCount = platformFilter === "all" ? releases.length : filteredReleases.length;
 
@@ -84,7 +98,7 @@ export default function PublishRoute() {
       <PageHeader
         eyebrow="Publishing ops"
         title="Publish queue"
-        description="Review rendered releases, approve or schedule automated delivery, and finish manual handoffs without leaving the operator surface."
+        description="Operate a fixed daily shorts cadence, then use the first 4 hours to decide what to ignore and what to turn into a follow-up."
         actions={platformActions}
         aside={
           <div className="space-y-2">
@@ -100,17 +114,29 @@ export default function PublishRoute() {
           </div>
         }
       />
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
-          label="Queue depth"
-          value={releasesQuery.isLoading ? "…" : metrics.queueDepth}
-          detail="Releases currently active in review, schedule, publish, or manual handoff lanes for the selected destination."
+          label="Scheduled today"
+          value={releasesQuery.isLoading ? "…" : metrics.scheduledToday}
+          detail="Shorts already placed into today’s fixed publish slots."
           timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}
         />
         <MetricCard
-          label="Awaiting review"
+          label="Ready to approve"
           value={releasesQuery.isLoading ? "…" : metrics.awaitingReview}
-          detail="Items in this platform view waiting on immediate upload or a schedule."
+          detail="Rendered releases waiting for immediate upload or a future slot."
+          timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}
+        />
+        <MetricCard
+          label="Early winners"
+          value={releasesQuery.isLoading ? "…" : metrics.winners}
+          detail="Recent posts worth extending into a rewrite, angle, or series."
+          timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}
+        />
+        <MetricCard
+          label="Flat posts"
+          value={releasesQuery.isLoading ? "…" : metrics.flats}
+          detail="Recent posts to discard mentally instead of micro-tweaking."
           timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}
         />
         <MetricCard

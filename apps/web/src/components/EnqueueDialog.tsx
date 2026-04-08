@@ -186,7 +186,7 @@ export default function EnqueueDialog({
             ))}
           </div>
           <p className="text-sm text-[var(--text-soft)]">
-            Queue now, then fine-tune individual publish times in the <Link to="/publish" className="text-cyan-100 underline decoration-white/20 underline-offset-4">publish queue</Link>. Default cadence is daily shorts at 12:00 UTC, with an optional Friday full-story YouTube compilation.
+            Queue now, then fine-tune individual publish times in the <Link to="/publish" className="text-cyan-100 underline decoration-white/20 underline-offset-4">publish queue</Link>. Default cadence now uses fixed daily short slots, with an optional Friday full-story YouTube compilation.
           </p>
         </div>
 
@@ -216,7 +216,7 @@ export default function EnqueueDialog({
 
         {!hasBundle ? (
           <div className="rounded-[1.3rem] border border-amber-400/20 bg-amber-400/[0.08] px-4 py-4 text-sm text-amber-50">
-            This story is not queue-ready yet because no asset bundle is attached. Finish media selection first.
+            This story is not queue-ready yet because no asset bundle is attached. Finish media selection and queue it from there.
             <div className="mt-3">
               <Link
                 to={`/story/${storyId}/media`}

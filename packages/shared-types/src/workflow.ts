@@ -1,5 +1,6 @@
 export const STORY_STATUSES = [
   "ingested",
+  "generating_script",
   "scripted",
   "approved",
   "media_ready",

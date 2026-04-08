@@ -5,5 +5,7 @@ __pycache__
 dist
 .git
 output
+local
+content
 .DS_Store
 .env

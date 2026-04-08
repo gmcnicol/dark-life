@@ -36,7 +36,7 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `TTS_RATE_LIMIT_RPS` – polite request rate limit
 - `TTS_SPEAKING_STYLE` – speaking style intensity (default `0`)
 - `TTS_SPEAKING_SPEED` – speaking speed multiplier (default `1.0`)
-- `XTTS_MODEL_DIR` – preferred XTTS artifact directory. Put `config.json`, `speakers_xtts.pth`, and one or more `best_model*.pth` files here, then switch models by changing this one path
+- `XTTS_MODEL_DIR` – preferred XTTS artifact directory. In Docker this should point at the repo-local mounted path such as `/opt/xtts/model`
 - `XTTS_CHECKPOINT_GLOB` – glob used to auto-pick the highest-step checkpoint inside `XTTS_MODEL_DIR`
 - `XTTS_WORKSPACE_DIR` – legacy workspace path kept for older local setups
 - `XTTS_RUN_DIR` – legacy run directory override; still accepted when the artifact layout is non-standard
@@ -44,12 +44,12 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `XTTS_CONFIG_PATH` – optional explicit config path override
 - `XTTS_VOCAB_PATH` – optional explicit vocab path; otherwise derived from `XTTS_MODEL_DIR` or `XTTS_MODEL_DIR/../xtts_original_model_files/vocab.json`
 - `XTTS_SPEAKER_FILE_PATH` – optional explicit `speakers_xtts.pth` path override
-- `XTTS_SPEAKER_WAV` – reference wav used for XTTS conditioning
+- `XTTS_SPEAKER_WAV` – reference wav used for XTTS conditioning. In Docker this should point at the repo-local mounted path such as `/opt/xtts/reference/your-speaker.wav`
 - `XTTS_LANGUAGE` – language passed to XTTS inference
 - `XTTS_DEVICE` – `cpu` or `mps` for the helper script
-- `XTTS_MOUNT_ROOT` – Docker-only bind mount root that makes the `XTTS_*` absolute paths visible inside the renderer container
+- `XTTS_MOUNT_ROOT` – legacy host-mount setting; not needed when using repo-local XTTS assets mounted from `local/xtts`
 
-If you want easy model swaps, set `XTTS_MODEL_DIR` and `XTTS_SPEAKER_WAV`, then leave the legacy `XTTS_RUN_DIR` / `XTTS_CHECKPOINT_PATH` / `XTTS_CONFIG_PATH` overrides empty.
+If you want Docker runs to be self-contained within this repo, copy the runtime XTTS assets into `local/xtts/` and point `XTTS_MODEL_DIR` / `XTTS_SPEAKER_WAV` at `/opt/xtts/...` paths. Leave the legacy `XTTS_RUN_DIR` / `XTTS_CHECKPOINT_PATH` / `XTTS_CONFIG_PATH` overrides empty.
 
 ## Whisper ASR
 - `WHISPER_MODEL` – Whisper model size

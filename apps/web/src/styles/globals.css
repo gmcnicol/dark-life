@@ -79,3 +79,54 @@ textarea {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.inbox-grid-theme .ag-root-wrapper,
+.inbox-grid-theme .ag-root-wrapper-body,
+.inbox-grid-theme .ag-root,
+.inbox-grid-theme .ag-body-viewport,
+.inbox-grid-theme .ag-center-cols-viewport,
+.inbox-grid-theme .ag-center-cols-container,
+.inbox-grid-theme .ag-pinned-left-cols-viewport,
+.inbox-grid-theme .ag-pinned-left-cols-container {
+  background: transparent !important;
+}
+
+.inbox-grid-theme .ag-header,
+.inbox-grid-theme .ag-pinned-left-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.inbox-grid-theme .ag-header-cell,
+.inbox-grid-theme .ag-cell {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.inbox-grid-theme .ag-cell {
+  display: flex;
+  align-items: center;
+  border-right: 0 !important;
+  color: rgba(216, 228, 246, 0.78);
+}
+
+.inbox-grid-theme .ag-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.inbox-grid-theme .ag-row-selected .ag-cell {
+  color: #f5f8ff;
+}
+
+.inbox-grid__id {
+  color: rgba(245, 248, 255, 0.88);
+  font-weight: 700;
+}
+
+.inbox-grid__next {
+  color: #c8f2fb;
+  font-weight: 600;
+}
+
+.inbox-grid__muted {
+  color: rgba(216, 228, 246, 0.62);
+}

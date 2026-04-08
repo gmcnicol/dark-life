@@ -9,7 +9,7 @@ import apps.api.main as main
 import apps.api.render_jobs as render_jobs
 from apps.api.models import AssetBundle, Job, PublishJob, Release, RenderPreset, Story, StoryPart
 from apps.api.pipeline import ensure_default_presets
-from shared.workflow import PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus
+from shared.workflow import JobStatus, PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus, StoryStatus
 
 
 def _auth_headers() -> dict[str, str]:
@@ -240,3 +240,119 @@ def test_compilation_job_hidden_until_part_jobs_ready(client):
     assert res.status_code == 200
     ids = {job["id"] for job in res.json()}
     assert compilation_job.id not in ids
+
+
+def test_list_render_jobs_applies_limit_after_readiness_filter(client):
+    client, engine = client
+    with Session(engine) as session:
+        story = Story(title="Story", status="queued")
+        session.add(story)
+        session.flush()
+        preset = session.exec(select(RenderPreset)).first()
+        part = StoryPart(
+            story_id=story.id,
+            index=1,
+            body_md="One.",
+            source_text="One.",
+            script_text="One.",
+            est_seconds=2,
+            approved=True,
+        )
+        session.add(part)
+        session.flush()
+        blocked_compilation = Job(
+            story_id=story.id,
+            compilation_id=1,
+            kind="render_compilation",
+            status="queued",
+            variant="weekly",
+            render_preset_id=preset.id if preset else None,
+        )
+        short_job = Job(
+            story_id=story.id,
+            story_part_id=part.id,
+            kind="render_part",
+            status="queued",
+            variant="short",
+            render_preset_id=preset.id if preset else None,
+        )
+        session.add(blocked_compilation)
+        session.add(short_job)
+        session.commit()
+        session.refresh(short_job)
+
+    res = client.get("/render-jobs", params={"status": "queued", "limit": 1}, headers=_auth_headers())
+    assert res.status_code == 200
+    jobs = res.json()
+    assert len(jobs) == 1
+    assert jobs[0]["id"] == short_job.id
+
+
+def test_admin_requeue_resets_stuck_render_job_and_release(client):
+    client, engine = client
+    with Session(engine) as session:
+        job_id = _create_job(session)
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.status = JobStatus.RENDERING.value
+        job.lease_expires_at = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+        job.error_class = "RuntimeError"
+        job.error_message = "stuck renderer"
+        job.result = {"artifact_path": "/tmp/bad.mp4"}
+        story = session.get(Story, job.story_id)
+        assert story is not None
+        story.status = StoryStatus.RENDERING.value
+        release = Release(
+            story_id=job.story_id,
+            story_part_id=job.story_part_id,
+            script_version_id=job.script_version_id,
+            platform="youtube",
+            variant=job.variant,
+            title="Story Part 1",
+            description="desc",
+            status=ReleaseStatus.ERRORED.value,
+            publish_status=ReleaseStatus.ERRORED.value,
+            approval_status=PublishApprovalStatus.APPROVED.value,
+            delivery_mode=PublishDeliveryMode.AUTOMATED.value,
+            last_error="Render failed",
+        )
+        session.add(job)
+        session.add(story)
+        session.add(release)
+        session.commit()
+
+    res = client.post(f"/admin/render-jobs/{job_id}/requeue", headers=_auth_headers())
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "queued"
+    assert body["error_message"] is None
+    assert body["result"] is None
+
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == JobStatus.QUEUED.value
+        assert job.lease_expires_at is None
+        assert job.error_class is None
+        assert job.error_message is None
+        assert job.result is None
+        story = session.get(Story, job.story_id)
+        assert story is not None
+        assert story.status == StoryStatus.QUEUED.value
+        release = session.exec(select(Release).where(Release.story_part_id == job.story_part_id)).first()
+        assert release is not None
+        assert release.status == ReleaseStatus.DRAFT.value
+        assert release.publish_status == ReleaseStatus.DRAFT.value
+        assert release.last_error is None
+        assert release.render_artifact_id is None
+
+
+def test_admin_requeue_requires_auth_and_valid_status(client):
+    client, engine = client
+    with Session(engine) as session:
+        job_id = _create_job(session)
+
+    assert client.post(f"/admin/render-jobs/{job_id}/requeue").status_code == 401
+
+    res = client.post(f"/admin/render-jobs/{job_id}/requeue", headers=_auth_headers())
+    assert res.status_code == 409

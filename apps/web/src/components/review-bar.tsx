@@ -11,6 +11,7 @@ import {
   canGenerateScript,
   canRejectStory,
   findNextReviewStoryId,
+  findNextStoryWithStatus,
   STATUS_LABELS,
   statusTone,
 } from "@/lib/workflow";
@@ -19,10 +20,12 @@ import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces"
 export default function ReviewBar({
   story,
   activeScript,
+  scriptGenerationPending = false,
   compact = false,
 }: {
   story: Story;
   activeScript: ScriptVersion | null;
+  scriptGenerationPending?: boolean;
   compact?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -30,8 +33,9 @@ export default function ReviewBar({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const canApprove = canApproveStory(story.status, Boolean(activeScript));
-  const canGenerate = canGenerateScript(story.status);
+  const canApproveScript = canApproveStory(story.status, Boolean(activeScript));
+  const needsSourceApproval = !activeScript && canGenerateScript(story.status) && !scriptGenerationPending;
+  const canGenerate = canGenerateScript(story.status) && !scriptGenerationPending;
   const canReject = canRejectStory(story.status);
 
   const run = (action: () => Promise<unknown>, successMessage?: string) => {
@@ -71,6 +75,18 @@ export default function ReviewBar({
     });
   };
 
+  const approveStoryAndAdvance = () => {
+    run(async () => {
+      await generateScript(story.id);
+      const stories = await queryClient.fetchQuery({
+        queryKey: ["stories", "review-next"],
+        queryFn: () => listStories({ limit: 200 }),
+      });
+      const nextStoryId = findNextStoryWithStatus(stories, story.id, "ingested");
+      navigate(nextStoryId ? `/story/${nextStoryId}/review` : "/inbox?status=ingested");
+    }, "Story queued for script generation.");
+  };
+
   return (
     <Panel className={compact ? "space-y-4 p-4" : "space-y-5"}>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -89,27 +105,29 @@ export default function ReviewBar({
             data-testid="status"
             className="block text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]"
           >
-            Current status: {story.status}
+            Current status: {STATUS_LABELS[story.status]}
           </span>
         </div>
       </div>
 
       <div className={compact ? "flex flex-col gap-3" : "flex flex-wrap items-center gap-3"}>
-        <ActionButton
-          onClick={() => run(() => generateScript(story.id), activeScript ? "Script regenerated." : "Script generated.")}
-          disabled={isPending || !canGenerate}
-          className={compact ? "w-full" : undefined}
-        >
-          {activeScript ? "Regenerate script" : "Generate script"}
-        </ActionButton>
-        <ActionButton
-          onClick={() => changeStatus("approved")}
-          tone="secondary"
-          disabled={isPending || !canApprove}
-          className={compact ? "w-full" : undefined}
-        >
-          Approve story
-        </ActionButton>
+        {needsSourceApproval || scriptGenerationPending ? (
+          <ActionButton
+            onClick={approveStoryAndAdvance}
+            disabled={isPending || !canGenerate}
+            className={compact ? "w-full" : undefined}
+          >
+            {scriptGenerationPending ? "Generating script…" : "Approve story"}
+          </ActionButton>
+        ) : (
+          <ActionButton
+            onClick={() => changeStatus("approved")}
+            disabled={isPending || !canApproveScript}
+            className={compact ? "w-full" : undefined}
+          >
+            Approve script
+          </ActionButton>
+        )}
         <ActionButton
           onClick={rejectAndAdvance}
           tone="danger"
@@ -120,59 +138,104 @@ export default function ReviewBar({
         </ActionButton>
       </div>
 
-      <div className={compact ? "grid gap-2 sm:grid-cols-2" : "grid gap-3 md:grid-cols-5"}>
-        <Link
-          to={`/story/${story.id}/split`}
-          className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
-        >
-          <p className="text-sm font-semibold text-white">Edit parts</p>
-          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Timing and sections</p>
-        </Link>
-        <Link
-          to={`/story/${story.id}/refinement`}
-          className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
-        >
-          <p className="text-sm font-semibold text-white">Open refinement lab</p>
-          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Variants and scoring</p>
-        </Link>
-        <Link
-          to={`/story/${story.id}/media`}
-          className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
-        >
-          <p className="text-sm font-semibold text-white">Choose media</p>
-          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Asset bundle</p>
-        </Link>
-        <Link
-          to={`/story/${story.id}/queue`}
-          className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
-        >
-          <p className="text-sm font-semibold text-white">Queue renders</p>
-          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Preset and platforms</p>
-        </Link>
-        <Link
-          to={`/story/${story.id}/jobs`}
-          className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
-        >
-          <p className="text-sm font-semibold text-white">Track jobs</p>
-          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Queue telemetry</p>
-        </Link>
-      </div>
+      {compact ? (
+        <div className="rounded-[1.2rem] border border-white/8 bg-black/15 p-4">
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
+            Next step
+          </p>
+          {activeScript ? (
+            <div className="mt-3 space-y-3">
+              <p className="text-sm leading-6 text-[var(--text-soft)]">
+                If the generated draft is good, move forward into script. Use alternatives only when the draft quality is weak and you need another pass.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Link
+                  to={`/story/${story.id}/split`}
+                  className="rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3 transition hover:border-white/14 hover:bg-white/[0.05]"
+                >
+                  <p className="text-sm font-semibold text-white">Open script</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Review blocks</p>
+                </Link>
+                <Link
+                  to={`/story/${story.id}/refinement`}
+                  className="rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3 transition hover:border-white/14 hover:bg-white/[0.05]"
+                >
+                  <p className="text-sm font-semibold text-white">Open lab</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Compare variants</p>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm leading-6 text-[var(--text-soft)]">
+              Generate the narration draft first. Script, media, and scheduling stay downstream from that gate.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-5">
+          <Link
+            to={`/story/${story.id}/split`}
+            className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
+          >
+            <p className="text-sm font-semibold text-white">Open script</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Primary blocks</p>
+          </Link>
+          <Link
+            to={`/story/${story.id}/refinement`}
+            className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
+          >
+            <p className="text-sm font-semibold text-white">Open refinement lab</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Variants and scoring</p>
+          </Link>
+          <Link
+            to={`/story/${story.id}/media`}
+            className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
+          >
+            <p className="text-sm font-semibold text-white">Choose media</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Asset bundle</p>
+          </Link>
+          <Link
+            to={`/story/${story.id}/queue`}
+            className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
+          >
+            <p className="text-sm font-semibold text-white">Queue renders</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Preset and platforms</p>
+          </Link>
+          <Link
+            to={`/story/${story.id}/jobs`}
+            className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
+          >
+            <p className="text-sm font-semibold text-white">Track jobs</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Queue telemetry</p>
+          </Link>
+        </div>
+      )}
 
       {success ? <StatusBadge tone="success">{success}</StatusBadge> : null}
       {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
-      {!canGenerate ? (
+      {scriptGenerationPending ? (
+        <p className="text-sm text-[var(--text-soft)]">
+          Script generation is running in the background. Stay on this page or move on; the draft will appear when the worker finishes.
+        </p>
+      ) : null}
+      {!canGenerateScript(story.status) ? (
         <p className="text-sm text-[var(--text-soft)]">
           Script generation is disabled because this story has already moved beyond the editable review stages.
         </p>
       ) : null}
-      {!canApprove && !activeScript ? (
+      {needsSourceApproval ? (
         <p className="text-sm text-[var(--text-soft)]">
-          Approval stays locked until a narrator-ready script exists for the current story.
+          Approving this story queues script generation and moves you straight to the next ingested story.
+        </p>
+      ) : null}
+      {!canApproveScript && activeScript && story.status !== "approved" ? (
+        <p className="text-sm text-[var(--text-soft)]">
+          Script approval unlocks after generation completes and the story is still in a reviewable state.
         </p>
       ) : null}
       {story.status === "approved" ? (
         <p className="text-sm text-[var(--text-soft)]">
-          Story approved. Move into parts or media to continue downstream production.
+          Script approved. Move into script and downstream production.
         </p>
       ) : null}
     </Panel>

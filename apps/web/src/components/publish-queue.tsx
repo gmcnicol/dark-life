@@ -43,7 +43,7 @@ function statusLabel(status: Release["status"]): string {
   if (status === "manual_handoff") {
     return "Manual handoff";
   }
-  return status.replace("_", " ");
+  return status.replace(/_/g, " ");
 }
 
 export default function PublishQueue({ releases }: { releases: Release[] }) {
@@ -62,6 +62,7 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
       ready: releases.filter((release) => release.status === "ready" || release.status === "approved"),
       scheduled: releases.filter((release) => release.status === "scheduled"),
       publishing: releases.filter((release) => release.status === "publishing"),
+      pulse: releases.filter((release) => release.status === "published" && Boolean(release.early_signal)),
       errored: releases.filter((release) => release.status === "errored"),
       manual: releases.filter((release) => release.status === "manual_handoff"),
     }),
@@ -138,6 +139,12 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
       items: grouped.publishing,
     },
     {
+      key: "pulse",
+      title: "Recent pulse",
+      description: "Shorts published in the early decision window. Ignore flats. Develop winners.",
+      items: grouped.pulse,
+    },
+    {
       key: "errored",
       title: "Errored",
       description: "Items that need operator attention before another publish attempt.",
@@ -170,6 +177,19 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
                         <StatusBadge tone={releaseTone(release.status)}>{statusLabel(release.status)}</StatusBadge>
                         <StatusBadge tone="neutral">{release.platform}</StatusBadge>
                         <StatusBadge tone="neutral">{release.variant}</StatusBadge>
+                        {release.early_signal ? (
+                          <StatusBadge
+                            tone={
+                              release.early_signal.state === "winner"
+                                ? "success"
+                                : release.early_signal.state === "flat"
+                                  ? "danger"
+                                  : "warning"
+                            }
+                          >
+                            {release.early_signal.state}
+                          </StatusBadge>
+                        ) : null}
                       </div>
                       <h2 className="text-xl font-semibold text-white">{release.title}</h2>
                     </div>
@@ -208,6 +228,25 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
                       </button>
                     </div>
                   </div>
+
+                  {release.early_signal ? (
+                    <div className="rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+                            Early signal
+                          </p>
+                          <p className="mt-1 text-sm text-white">{release.early_signal.summary}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+                            Recommended action
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-white">{release.early_signal.recommended_action}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {release.signed_asset_url ? (
                     previewOpen[release.id] ? (

@@ -25,6 +25,18 @@ function telemetryTimestampLabel(updatedAt: number): string {
   }).format(updatedAt);
 }
 
+function isSameUtcDay(value: string | null | undefined, now: Date): boolean {
+  if (!value) {
+    return false;
+  }
+  const date = new Date(value);
+  return (
+    date.getUTCFullYear() === now.getUTCFullYear() &&
+    date.getUTCMonth() === now.getUTCMonth() &&
+    date.getUTCDate() === now.getUTCDate()
+  );
+}
+
 export default function DashboardRoute() {
   const queryClient = useQueryClient();
   const [subredditInput, setSubredditInput] = useState("");
@@ -46,6 +58,7 @@ export default function DashboardRoute() {
 
   const stories = storiesQuery.data ?? [];
   const releaseQueue = releasesQuery.data ?? [];
+  const now = new Date();
   const counts = stories.reduce<Record<string, number>>((acc, story) => {
     acc[story.status] = (acc[story.status] ?? 0) + 1;
     return acc;
@@ -55,18 +68,20 @@ export default function DashboardRoute() {
     .filter((story) => !["published", "rejected"].includes(story.status))
     .sort((a, b) => a.id - b.id);
 
-  const stagePressure = [
-    { label: "Script review", value: (counts.ingested ?? 0) + (counts.scripted ?? 0) },
-    { label: "Media prep", value: (counts.approved ?? 0) + (counts.media_ready ?? 0) },
-    { label: "Render queue", value: (counts.queued ?? 0) + (counts.rendering ?? 0) },
-  ];
+  const scheduledToday = releaseQueue.filter((release) => isSameUtcDay(release.publish_at, now)).length;
+  const publishedRecent = releaseQueue.filter(
+    (release) => release.status === "published" && Boolean(release.early_signal),
+  ).length;
+  const winners = releaseQueue.filter((release) => release.early_signal?.state === "winner").length;
+  const flats = releaseQueue.filter((release) => release.early_signal?.state === "flat").length;
+  const pulseReleases = releaseQueue.filter((release) => Boolean(release.early_signal));
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Studio control"
         title="Dark Life production board"
-        description="Keep the whole content factory legible at a glance: what needs review, what is waiting on media, what is in the render queue, and what is ready for manual publish."
+        description="Run an early-phase shorts program: keep volume up, know what is scheduled today, and separate winners from flats without over-managing every post."
         actions={
           <>
             <Link
@@ -85,8 +100,13 @@ export default function DashboardRoute() {
         }
         aside={
           <div className="space-y-3">
-            <StatusBadge tone="accent">Queue health</StatusBadge>
-            {stagePressure.map((item) => (
+            <StatusBadge tone="accent">Early pulse</StatusBadge>
+            {[
+              { label: "Scheduled today", value: scheduledToday },
+              { label: "Published < 4h", value: publishedRecent },
+              { label: "Winners", value: winners },
+              { label: "Flat", value: flats },
+            ].map((item) => (
               <div key={item.label} className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-white/8 bg-white/[0.04] px-4 py-3">
                 <span className="text-sm text-[var(--text-soft)]">{item.label}</span>
                 <span className="font-display text-2xl text-white">{item.value}</span>
@@ -97,10 +117,10 @@ export default function DashboardRoute() {
       />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Active stories" value={storiesQuery.isLoading ? "…" : activeStories.length} detail="Stories still moving through review, media, render, or publish handoff." timestamp={telemetryTimestampLabel(storiesQuery.dataUpdatedAt)} />
-        <MetricCard label="Script pressure" value={storiesQuery.isLoading ? "…" : (counts.ingested ?? 0) + (counts.scripted ?? 0)} detail="Items still waiting for script approval or narrative cleanup." timestamp={telemetryTimestampLabel(storiesQuery.dataUpdatedAt)} />
-        <MetricCard label="Render pressure" value={storiesQuery.isLoading ? "…" : (counts.queued ?? 0) + (counts.rendering ?? 0)} detail="Stories already committed to render execution or actively processing." timestamp={telemetryTimestampLabel(storiesQuery.dataUpdatedAt)} />
-        <MetricCard label="Publish queue" value={releasesQuery.isLoading ? "…" : releaseQueue.length} detail="Releases currently waiting on approval, schedule, delivery, or manual completion." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
+        <MetricCard label="Scheduled today" value={releasesQuery.isLoading ? "…" : scheduledToday} detail="Shorts already slotted into today’s fixed cadence." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
+        <MetricCard label="Published < 4h" value={releasesQuery.isLoading ? "…" : publishedRecent} detail="Fresh posts still inside the early decision window." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
+        <MetricCard label="Early winners" value={releasesQuery.isLoading ? "…" : winners} detail="Posts worth extending into a rewrite, new angle, or series." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
+        <MetricCard label="Flat posts" value={releasesQuery.isLoading ? "…" : flats} detail="Posts to mentally discard and leave alone instead of obsessing over." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
       </section>
 
       <Panel className="space-y-4">
@@ -173,7 +193,7 @@ export default function DashboardRoute() {
           <SectionHeading
             eyebrow="Operator queue"
             title="Stories needing attention"
-            description="Open the highest-value item directly at its next valid stage instead of bouncing through the full workspace."
+            description="Keep review and production moving while the publish side runs on a fixed daily cadence."
             action={
               <Link to="/inbox" className="text-sm font-semibold text-[var(--text-soft)] transition hover:text-white">
                 See full inbox
@@ -210,31 +230,44 @@ export default function DashboardRoute() {
 
         <Panel className="space-y-4">
           <SectionHeading
-            eyebrow="Manual handoff"
-            title="Publish queue"
-            description="Releases that have cleared render and are waiting on a final operator action."
+            eyebrow="Early signal"
+            title="Recent release pulse"
+            description="Use the first 4 hours to decide what to ignore and what to expand into a follow-up."
             action={
               <Link to="/publish" className="text-sm font-semibold text-[var(--text-soft)] transition hover:text-white">
                 Open queue
               </Link>
             }
           />
-          {releaseQueue.length === 0 ? (
+          {pulseReleases.length === 0 ? (
             <EmptyState
-              title="Nothing is publish-ready"
-              description="Rendered releases will land here once the pipeline marks them ready for manual posting."
+              title="No recent release signal yet"
+              description="Once shorts are published or scheduled, this view will show the early winners and flats."
             />
           ) : (
             <div className="space-y-3">
-              {releaseQueue.slice(0, 4).map((release) => (
+              {pulseReleases
+                .slice(0, 4)
+                .map((release) => (
                 <div key={release.id} className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <h3 className="text-base font-semibold text-white">{release.title}</h3>
-                    <StatusBadge tone={release.status === "errored" ? "danger" : release.status === "manual_handoff" ? "warning" : "success"}>
-                      {release.platform}
+                    <StatusBadge
+                      tone={
+                        release.early_signal?.state === "winner"
+                          ? "success"
+                          : release.early_signal?.state === "flat"
+                            ? "danger"
+                            : "warning"
+                      }
+                    >
+                      {release.early_signal?.state ?? "monitor"}
                     </StatusBadge>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">{release.description}</p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">{release.early_signal?.summary}</p>
+                  <p className="mt-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
+                    {release.early_signal?.recommended_action} · {release.platform}
+                  </p>
                 </div>
               ))}
             </div>

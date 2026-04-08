@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from services.scheduler import main as scheduler_main
 
 
@@ -77,3 +79,12 @@ def test_schedule_approved_shorts_creates_fresh_bundle_and_releases(monkeypatch)
             "asset_bundle_id": 77,
         }
     ]
+
+
+def test_write_heartbeat_creates_scheduler_marker(monkeypatch, tmp_path):
+    heartbeat_path = tmp_path / "scheduler_heartbeat"
+    monkeypatch.setattr(scheduler_main, "HEARTBEAT_PATH", heartbeat_path)
+
+    scheduler_main.write_heartbeat()
+
+    assert heartbeat_path.exists()

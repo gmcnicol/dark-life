@@ -328,13 +328,21 @@ class Settings(BaseSettings):
         default="youtube",
         description="Comma-separated list of active publish platforms",
     )
+    SHORTS_PUBLISH_SLOTS_UTC: str = Field(
+        default="08:00,13:00,18:00",
+        description="Comma-separated UTC publish slots for short-form releases in HH:MM format",
+    )
     SHORTS_PUBLISH_HOUR_UTC: int = Field(
         default=12,
-        description="UTC hour for scheduled short-form publishes",
+        description="Legacy fallback UTC hour for scheduled short-form publishes when no slot list is configured",
     )
     SHORTS_PUBLISH_MINUTE_UTC: int = Field(
         default=0,
-        description="UTC minute for scheduled short-form publishes",
+        description="Legacy fallback UTC minute for scheduled short-form publishes when no slot list is configured",
+    )
+    EARLY_SIGNAL_WINDOW_HOURS: int = Field(
+        default=4,
+        description="Primary early decision window in hours for short-form release performance",
     )
     WEEKLY_COMPILATION_DAY_UTC: int = Field(
         default=4,

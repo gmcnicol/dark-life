@@ -1,14 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import InboxGrid from "@/components/inbox-grid";
-import { listStories } from "@/lib/stories";
-import { LoadingState, MetricCard, PageHeader, StatusBadge } from "@/components/ui-surfaces";
+import { enqueueRedditIncremental, listStories } from "@/lib/stories";
+import { ActionButton, LoadingState, PageHeader, StatusBadge } from "@/components/ui-surfaces";
 
 const INBOX_FILTERS = [
   { value: "active", label: "Active" },
   { value: "all", label: "All" },
   { value: "ingested", label: "Ingested" },
+  { value: "generating_script", label: "Generating Script" },
   { value: "scripted", label: "Scripted" },
   { value: "approved", label: "Approved" },
   { value: "media_ready", label: "Media Ready" },
@@ -18,6 +19,7 @@ const INBOX_FILTERS = [
 ];
 
 export default function InboxRoute() {
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = searchParams.get("status") || "active";
   const storiesQuery = useQuery({
@@ -27,6 +29,12 @@ export default function InboxRoute() {
         status: filter === "active" || filter === "all" ? undefined : filter,
         limit: 200,
       }),
+  });
+  const ingestMutation = useMutation({
+    mutationFn: () => enqueueRedditIncremental({}),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["stories"] });
+    },
   });
 
   const stories = useMemo(() => {
@@ -46,8 +54,25 @@ export default function InboxRoute() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Editorial triage"
-        title="Story inbox"
-        description="Keep the front of the workflow clean: review incoming stories, preserve focus on active work, and move directly into the next valid stage."
+        title="Stories"
+        description="Review incoming stories, keep active work visible, and run ingestion without leaving the main queue."
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <ActionButton onClick={() => ingestMutation.mutate()} disabled={ingestMutation.isPending}>
+              {ingestMutation.isPending ? "Running ingest…" : "Run ingest"}
+            </ActionButton>
+            {ingestMutation.isSuccess ? (
+              <StatusBadge tone="success">
+                {ingestMutation.data.total_inserted} ingested
+              </StatusBadge>
+            ) : null}
+            {ingestMutation.isError ? (
+              <StatusBadge tone="danger">
+                {ingestMutation.error instanceof Error ? ingestMutation.error.message : "Ingest failed"}
+              </StatusBadge>
+            ) : null}
+          </div>
+        }
         aside={
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -81,13 +106,7 @@ export default function InboxRoute() {
         }
       />
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Visible stories" value={storiesQuery.isLoading ? "…" : stories.length} detail="Stories in the current filter scope." />
-        <MetricCard label="Waiting for script" value={storiesQuery.isLoading ? "…" : (statusCounts.ingested ?? 0) + (statusCounts.scripted ?? 0)} detail="Stories that still need review-bar action before media prep." />
-        <MetricCard label="Ready for media or queue" value={storiesQuery.isLoading ? "…" : (statusCounts.approved ?? 0) + (statusCounts.media_ready ?? 0)} detail="Stories that have moved past review and are eligible for downstream work." />
-      </section>
-
-      {storiesQuery.isLoading ? <LoadingState label="Loading inbox queue…" className="min-h-64" /> : <InboxGrid stories={stories} />}
+      {storiesQuery.isLoading ? <LoadingState label="Loading story queue…" className="min-h-64" /> : <InboxGrid stories={stories} />}
     </div>
   );
 }

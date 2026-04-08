@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 
 from shared.config import settings
 from shared.logging import log_error, log_info
 
+HEARTBEAT_PATH = Path("/tmp/renderer/scheduler_heartbeat")
+
 
 def _headers() -> dict[str, str]:
     if settings.API_AUTH_TOKEN:
         return {"Authorization": f"Bearer {settings.API_AUTH_TOKEN}"}
     return {}
+
+
+def write_heartbeat() -> None:
+    HEARTBEAT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HEARTBEAT_PATH.write_text(str(time.time()), encoding="ascii")
 
 
 def _active_short_release_exists(story_id: int, active_script_version_id: int, sess: requests.sessions.Session, base: str) -> bool:
@@ -110,10 +118,14 @@ def schedule_approved_shorts(session: requests.sessions.Session | None = None) -
         )
 
 
-def run_once(session: requests.sessions.Session | None = None) -> None:
+def run_once(
+    session: requests.sessions.Session | None = None,
+    *,
+    include_reddit_incremental: bool = True,
+) -> None:
     sess = session or requests
     base = settings.API_BASE_URL.rstrip("/")
-    if settings.SCHEDULER_ENABLE_REDDIT:
+    if include_reddit_incremental and settings.SCHEDULER_ENABLE_REDDIT:
         try:
             sess.post(
                 f"{base}/admin/reddit/incremental",
@@ -173,8 +185,12 @@ def run_once(session: requests.sessions.Session | None = None) -> None:
 
 def run() -> None:  # pragma: no cover - continuous loop
     log_info("scheduler_start", interval_sec=settings.SCHEDULER_INTERVAL_SEC)
+    write_heartbeat()
+    first_run = True
     while True:
-        run_once()
+        run_once(include_reddit_incremental=not first_run)
+        first_run = False
+        write_heartbeat()
         time.sleep(settings.SCHEDULER_INTERVAL_SEC)
 
 

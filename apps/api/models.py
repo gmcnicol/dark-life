@@ -408,6 +408,16 @@ class Release(ReleaseBase, TimestampedModel, table=True):
     )
 
 
+class ReleaseEarlySignalRead(SQLModel):
+    window_hours: int
+    state: str
+    score: float
+    recommended_action: str
+    summary: str
+    evaluated_at: datetime | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+
+
 class ReleaseRead(ReleaseBase):
     id: int
     published_at: datetime | None = None
@@ -416,6 +426,7 @@ class ReleaseRead(ReleaseBase):
     artifact_path: str | None = None
     signed_asset_url: str | None = None
     publish_job_id: int | None = None
+    early_signal: ReleaseEarlySignalRead | None = None
 
 
 class PublishJobBase(SQLModel):
@@ -592,6 +603,7 @@ __all__ = [
     "PublishJob",
     "PublishJobRead",
     "Release",
+    "ReleaseEarlySignalRead",
     "ReleaseRead",
     "RenderArtifact",
     "RenderArtifactRead",

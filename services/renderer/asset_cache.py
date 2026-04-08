@@ -33,6 +33,25 @@ def _suffix_for_asset(asset: dict, response: requests.Response | None = None) ->
     return ".mp4" if asset.get("type") == "video" else ".jpg"
 
 
+def _resolve_pixabay_remote_url(provider_id: str) -> str | None:
+    if not settings.PIXABAY_API_KEY:
+        return None
+    response = requests.get(
+        "https://pixabay.com/api/",
+        params={
+            "key": settings.PIXABAY_API_KEY,
+            "id": provider_id,
+        },
+        timeout=12,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    hit = next(iter(payload.get("hits", [])), None)
+    if not isinstance(hit, dict):
+        return None
+    return hit.get("webformatURL") or hit.get("largeImageURL")
+
+
 def materialize_asset(
     asset: dict,
     *,
@@ -53,8 +72,20 @@ def materialize_asset(
     dest_dir = output_dir or Path(settings.TMP_DIR)
     dest_dir.mkdir(parents=True, exist_ok=True)
     sess = session or requests
-    resp = sess.get(remote_url, timeout=60, stream=True)
-    resp.raise_for_status()
+    try:
+        resp = sess.get(remote_url, timeout=60, stream=True)
+        resp.raise_for_status()
+    except requests.HTTPError:
+        provider = str(asset.get("provider") or "")
+        provider_id = str(asset.get("provider_id") or "")
+        if provider != "pixabay" or not provider_id:
+            raise
+        refreshed_url = _resolve_pixabay_remote_url(provider_id)
+        if not refreshed_url or refreshed_url == remote_url:
+            raise
+        remote_url = refreshed_url
+        resp = sess.get(remote_url, timeout=60, stream=True)
+        resp.raise_for_status()
     suffix = _suffix_for_asset(asset, response=resp)
     stem = asset.get("key") or asset.get("provider_id") or "selected-media"
     target = dest_dir / f"{stem}{suffix}"

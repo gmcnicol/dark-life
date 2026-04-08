@@ -1,12 +1,7 @@
 name: Renderer Smoke Test
 
 on:
-  pull_request:
-    paths:
-      - 'video_renderer/**'
-      - 'services/renderer/**'
-      - 'tests/renderer/**'
-      - '.github/workflows/renderer-smoke.yml'
+  workflow_dispatch:
 
 jobs:
   smoke:

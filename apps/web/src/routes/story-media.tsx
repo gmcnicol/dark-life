@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import MediaSelector from "@/components/MediaSelector";
 import { LoadingState } from "@/components/ui-surfaces";
-import { getStoryOverview, listStoryAssets } from "@/lib/stories";
+import { getPublishPlatformSettings, getStoryOverview, listStoryAssets } from "@/lib/stories";
 
 export default function StoryMediaRoute() {
   const params = useParams();
@@ -17,8 +17,19 @@ export default function StoryMediaRoute() {
     queryFn: () => listStoryAssets(storyId),
     enabled: Number.isFinite(storyId),
   });
+  const publishPlatformsQuery = useQuery({
+    queryKey: ["publish-platform-settings"],
+    queryFn: getPublishPlatformSettings,
+  });
 
-  if (overviewQuery.isLoading || assetsQuery.isLoading || !overviewQuery.data || !assetsQuery.data) {
+  if (
+    overviewQuery.isLoading ||
+    assetsQuery.isLoading ||
+    publishPlatformsQuery.isLoading ||
+    !overviewQuery.data ||
+    !assetsQuery.data ||
+    !publishPlatformsQuery.data
+  ) {
     return <LoadingState label="Loading media library…" className="min-h-56" />;
   }
 
@@ -27,6 +38,7 @@ export default function StoryMediaRoute() {
       story={overviewQuery.data.story}
       parts={overviewQuery.data.parts}
       assets={assetsQuery.data}
+      publishPlatforms={publishPlatformsQuery.data}
     />
   );
 }

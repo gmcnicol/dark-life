@@ -163,9 +163,10 @@ def list_render_jobs(
     query = select(Job).where(Job.kind.ilike("render_%"))
     if status:
         query = query.where(Job.status == status)
-    query = query.order_by(Job.id).limit(limit)
+    query = query.order_by(Job.id)
     jobs = session.exec(query).all()
-    return [job for job in jobs if _compilation_dependencies_ready(job, session)]
+    ready_jobs = [job for job in jobs if _compilation_dependencies_ready(job, session)]
+    return ready_jobs[:limit]
 
 
 @router.post("/{job_id}/claim")

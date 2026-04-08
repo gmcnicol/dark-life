@@ -15,7 +15,7 @@ export default function StorySplitRoute() {
   const overview = overviewQuery.data;
 
   if (overviewQuery.isLoading || !overview) {
-    return <LoadingState label="Loading part timeline…" className="min-h-56" />;
+    return <LoadingState label="Loading script blocks…" className="min-h-56" />;
   }
 
   return <SplitEditor story={overview.story} parts={overview.parts} />;
