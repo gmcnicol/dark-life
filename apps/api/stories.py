@@ -55,6 +55,7 @@ from .publishing import (
     maybe_mark_story_published,
     release_read,
     resolve_publish_job,
+    short_release_schedule_from,
     weekly_compilation_schedule,
     validate_release_platform,
 )
@@ -151,6 +152,11 @@ class ScriptGenerationAccepted(BaseModel):
 class PublishUpdate(BaseModel):
     platform_video_id: str | None = None
     notes: str | None = None
+
+
+class ReleaseRescheduleResult(BaseModel):
+    total_rescheduled: int
+    releases: list[ReleaseRead]
 
 
 class ReleaseApprovalUpdate(BaseModel):
@@ -1054,6 +1060,54 @@ def clear_release_from_queue(
     maybe_mark_story_published(session, release.story_id)
     session.commit()
     return release_read(session, release)
+
+
+@router.post("/releases/reschedule", response_model=ReleaseRescheduleResult)
+def reschedule_release_queue(
+    session: Session = Depends(get_session),
+) -> ReleaseRescheduleResult:
+    eligible_statuses = [
+        ReleaseStatus.READY.value,
+        ReleaseStatus.APPROVED.value,
+        ReleaseStatus.SCHEDULED.value,
+        ReleaseStatus.MANUAL_HANDOFF.value,
+        ReleaseStatus.ERRORED.value,
+    ]
+    releases = session.exec(
+        select(Release)
+        .where(
+            Release.variant == RenderVariant.SHORT.value,
+            Release.status.in_(eligible_statuses),
+        )
+        .order_by(Release.publish_at.asc().nullslast(), Release.id.asc())
+    ).all()
+
+    if not releases:
+        return ReleaseRescheduleResult(total_rescheduled=0, releases=[])
+
+    slots = short_release_schedule_from(datetime.now(timezone.utc), count=len(releases))
+    for release, publish_at in zip(releases, slots, strict=True):
+        release.publish_at = publish_at
+        release.last_error = None
+        if release.approval_status == PublishApprovalStatus.APPROVED.value:
+            _sync_release_state(release, approval_payload_status(publish_at))
+        ensure_publish_job(
+            session,
+            release,
+            not_before=publish_at,
+            payload={
+                "delivery_mode": release.delivery_mode,
+                "variant": release.variant,
+                "rescheduled": True,
+            },
+        )
+        session.add(release)
+
+    session.commit()
+    return ReleaseRescheduleResult(
+        total_rescheduled=len(releases),
+        releases=[release_read(session, release) for release in releases],
+    )
 
 
 @router.post("/stories/{story_id}/compilations", response_model=CompilationRead)

@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { MediaRef, PublishPlatformSettings, Story, StoryPart } from "@/lib/stories";
-import { createAssetBundle, createShortReleases, indexStoryAssets } from "@/lib/stories";
-import { canManageMedia, STATUS_LABELS } from "@/lib/workflow";
+import { createAssetBundle, createShortReleases, indexStoryAssets, listStories } from "@/lib/stories";
+import { canManageMedia, findNextStoryWithStatus, STATUS_LABELS } from "@/lib/workflow";
 import { ActionButton, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 export default function MediaSelector({
@@ -93,7 +93,12 @@ export default function MediaSelector({
           asset_bundle_id: bundle.id,
         });
         await queryClient.invalidateQueries();
-        navigate(`/story/${story.id}/jobs`);
+        const stories = await queryClient.fetchQuery({
+          queryKey: ["stories", "media-next"],
+          queryFn: () => listStories({ limit: 200 }),
+        });
+        const nextStoryId = findNextStoryWithStatus(stories, story.id, "approved");
+        navigate(nextStoryId ? `/story/${nextStoryId}/media` : "/inbox?status=approved");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to queue renders and schedule publishing");
       }

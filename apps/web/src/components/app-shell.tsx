@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: "/experiments", label: "Experiments", kicker: "Learning loop" },
   { to: "/board", label: "Pipeline", kicker: "Stage pressure" },
   { to: "/jobs", label: "Renders", kicker: "Worker queue" },
+  { to: "/insights", label: "Insights", kicker: "Release pulse" },
   { to: "/publish", label: "Publish", kicker: "Approval + delivery" },
   { to: "/settings", label: "Settings", kicker: "System defaults" },
 ];
@@ -66,6 +67,14 @@ function routeMeta(pathname: string) {
       title: "Queue telemetry",
       description:
         "Track current worker activity, artifact output, and queue health without dropping into backend logs for every answer.",
+    };
+  }
+  if (pathname.startsWith("/insights")) {
+    return {
+      eyebrow: "Performance insights",
+      title: "Release pulse",
+      description:
+        "Track posted Shorts, stale metrics sync, and follow-up candidates without losing the queue context.",
     };
   }
   if (pathname.startsWith("/publish")) {

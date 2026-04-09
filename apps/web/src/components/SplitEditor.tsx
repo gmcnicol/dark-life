@@ -5,8 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { BionicReadingToggle, BionicText } from "@/components/bionic-text";
 import type { Story, StoryPart } from "@/lib/stories";
-import { updateStoryStatus } from "@/lib/stories";
-import { canRejectStory, canTransitionStory, STATUS_LABELS, statusTone } from "@/lib/workflow";
+import { listStories, updateStoryStatus } from "@/lib/stories";
+import { canRejectStory, canTransitionStory, findNextStoryWithStatus, STATUS_LABELS, statusTone } from "@/lib/workflow";
 import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 export default function SplitEditor({
@@ -47,8 +47,13 @@ export default function SplitEditor({
           await queryClient.invalidateQueries({ queryKey: ["story", story.id] });
           await queryClient.invalidateQueries({ queryKey: ["stories"] });
         }
-        setSuccess("Script approved. Moving to media.");
-        navigate(`/story/${story.id}/media`);
+        const stories = await queryClient.fetchQuery({
+          queryKey: ["stories", "script-next"],
+          queryFn: () => listStories({ limit: 200 }),
+        });
+        const nextStoryId = findNextStoryWithStatus(stories, story.id, "scripted");
+        setSuccess("Script approved and queued for media.");
+        navigate(nextStoryId ? `/story/${nextStoryId}/split` : "/inbox?status=scripted");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to approve script");
       }

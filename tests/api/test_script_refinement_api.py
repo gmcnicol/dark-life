@@ -6,7 +6,9 @@ from sqlmodel import SQLModel, Session, create_engine
 from apps.api.db import get_session
 import apps.api.main as main
 from apps.api.pipeline import ensure_default_presets
+from apps.api.models import Story
 from apps.api.refinement import ensure_default_prompt_versions
+from apps.api.script_refinement import run_compat_script_generation
 from shared.config import settings
 
 
@@ -157,9 +159,14 @@ def test_script_batch_flow_creates_candidates_and_shortlist(client):
 
 
 def test_script_version_releases_are_variant_aware(client):
-    client, _engine = client
+    client, engine = client
     story = client.post("/stories", json={"title": "Variant story", "body_md": "One. Two. Three. Four. Five."}).json()
-    script = client.post(f"/stories/{story['id']}/script").json()
+    with Session(engine) as session:
+        story_model = session.get(Story, story["id"])
+        assert story_model is not None
+        script = run_compat_script_generation(session, story_model)
+        session.commit()
+        session.refresh(script)
 
     bundle = client.post(
         f"/stories/{story['id']}/asset-bundles",
@@ -179,13 +186,15 @@ def test_script_version_releases_are_variant_aware(client):
     assert bundle.status_code == 200
 
     releases = client.post(
-        f"/script-versions/{script['id']}/releases",
+        f"/script-versions/{script.id}/releases",
         json={"platforms": ["youtube"], "preset_slug": "short-form", "asset_bundle_id": bundle.json()["id"]},
     )
     assert releases.status_code == 200
     rows = releases.json()
-    assert len(rows) == 5
-    assert all(row["script_version_id"] == script["id"] for row in rows)
+    parts = client.get(f"/script-versions/{script.id}/parts")
+    assert parts.status_code == 200
+    assert len(rows) == len(parts.json())
+    assert all(row["script_version_id"] == script.id for row in rows)
 
 
 def test_prompt_version_activation_archives_previous_active(client):

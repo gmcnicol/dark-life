@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import InboxGrid from "@/components/inbox-grid";
-import { enqueueRedditIncremental, listStories } from "@/lib/stories";
+import { enqueueRedditIncremental, getPublishPlatformSettings, listReleaseQueue, listStories } from "@/lib/stories";
+import { buildQueueRunwaySummary } from "@/lib/publish-planning";
 import { ActionButton, LoadingState, PageHeader, StatusBadge } from "@/components/ui-surfaces";
 
 const INBOX_FILTERS = [
@@ -30,6 +31,11 @@ export default function InboxRoute() {
         limit: 200,
       }),
   });
+  const releasesQuery = useQuery({ queryKey: ["release-queue"], queryFn: listReleaseQueue });
+  const publishSettingsQuery = useQuery({
+    queryKey: ["publish-platform-settings"],
+    queryFn: getPublishPlatformSettings,
+  });
   const ingestMutation = useMutation({
     mutationFn: () => enqueueRedditIncremental({}),
     onSuccess: async () => {
@@ -44,11 +50,7 @@ export default function InboxRoute() {
     }
     return items;
   }, [storiesQuery.data, filter]);
-
-  const statusCounts = stories.reduce<Record<string, number>>((acc, story) => {
-    acc[story.status] = (acc[story.status] ?? 0) + 1;
-    return acc;
-  }, {});
+  const runway = buildQueueRunwaySummary(releasesQuery.data ?? [], stories, publishSettingsQuery.data);
 
   return (
     <div className="space-y-6">
@@ -61,6 +63,8 @@ export default function InboxRoute() {
             <ActionButton onClick={() => ingestMutation.mutate()} disabled={ingestMutation.isPending}>
               {ingestMutation.isPending ? "Running ingest…" : "Run ingest"}
             </ActionButton>
+            <StatusBadge tone="accent">{runway.queuedDays.toFixed(1)} days queued</StatusBadge>
+            <StatusBadge tone="warning">Need ~{runway.storiesNeededApprox} more stories for 30 days</StatusBadge>
             {ingestMutation.isSuccess ? (
               <StatusBadge tone="success">
                 {ingestMutation.data.total_inserted} ingested
@@ -102,11 +106,18 @@ export default function InboxRoute() {
                 </option>
               ))}
             </select>
+            <div className="rounded-[1.2rem] border border-white/8 bg-white/[0.04] px-4 py-3 text-sm text-[var(--text-soft)]">
+              {runway.reviewableStoriesNow} ingested ready now. Avg {runway.averageShortsPerStory.toFixed(1)} shorts per reviewed story.
+            </div>
           </div>
         }
       />
 
-      {storiesQuery.isLoading ? <LoadingState label="Loading story queue…" className="min-h-64" /> : <InboxGrid stories={stories} />}
+      {(storiesQuery.isLoading || releasesQuery.isLoading || publishSettingsQuery.isLoading) ? (
+        <LoadingState label="Loading story queue…" className="min-h-64" />
+      ) : (
+        <InboxGrid stories={stories} />
+      )}
     </div>
   );
 }

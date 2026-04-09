@@ -16,8 +16,7 @@ except Exception:  # pragma: no cover
     Credentials = None  # type: ignore
 
 from shared.config import settings
-
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+from shared.youtube_oauth import YOUTUBE_OAUTH_SCOPES
 
 
 class YouTubePublishError(RuntimeError):
@@ -30,7 +29,10 @@ def publish(video_path: Path, title: str, description: str) -> str:
     creds = None
     if settings.YOUTUBE_TOKEN_FILE and settings.YOUTUBE_TOKEN_FILE.exists():
         try:
-            creds = Credentials.from_authorized_user_file(str(settings.YOUTUBE_TOKEN_FILE), SCOPES)
+            creds = Credentials.from_authorized_user_file(
+                str(settings.YOUTUBE_TOKEN_FILE),
+                YOUTUBE_OAUTH_SCOPES,
+            )
         except Exception as exc:  # pragma: no cover
             raise YouTubePublishError(f"Failed to load YouTube token: {exc}") from exc
     if not creds:

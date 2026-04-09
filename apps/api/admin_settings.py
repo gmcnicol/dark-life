@@ -8,6 +8,7 @@ from sqlmodel import SQLModel, Session, select
 from .db import get_session
 from .models import StudioSetting
 from .publishing import active_publish_platforms, configured_publish_platforms
+from shared.config import settings
 
 router = APIRouter(prefix="/admin/settings", tags=["admin-settings"])
 
@@ -27,6 +28,7 @@ class PublishPlatformSettingsRead(SQLModel):
     available_platforms: list[str]
     active_platforms: list[str]
     weekly_supported_platforms: list[str]
+    short_slots_utc: list[str]
 
 
 class PublishPlatformSettingsUpdate(SQLModel):
@@ -53,6 +55,7 @@ def get_publish_platform_settings(
         available_platforms=available,
         active_platforms=active_publish_platforms(session),
         weekly_supported_platforms=[platform for platform in ["youtube"] if platform in available],
+        short_slots_utc=[slot.strip() for slot in settings.SHORTS_PUBLISH_SLOTS_UTC.split(",") if slot.strip()],
     )
 
 
@@ -78,6 +81,7 @@ def update_publish_platform_settings(
         available_platforms=available,
         active_platforms=active_publish_platforms(session),
         weekly_supported_platforms=[platform for platform in ["youtube"] if platform in available],
+        short_slots_utc=[slot.strip() for slot in settings.SHORTS_PUBLISH_SLOTS_UTC.split(",") if slot.strip()],
     )
 
 

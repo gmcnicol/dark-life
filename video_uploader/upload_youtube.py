@@ -16,8 +16,7 @@ except Exception:  # pragma: no cover - dependencies may be missing
     Credentials = None  # type: ignore
     InstalledAppFlow = None  # type: ignore
 
-
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+from shared.youtube_oauth import YOUTUBE_OAUTH_SCOPES
 
 
 def upload(
@@ -40,7 +39,10 @@ def upload(
     creds = None
     if token_file and token_file.exists():
         try:
-            creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+            creds = Credentials.from_authorized_user_file(
+                str(token_file),
+                YOUTUBE_OAUTH_SCOPES,
+            )
         except Exception as exc:  # pragma: no cover - handled gracefully
             print(f"Failed to load YouTube token: {exc}")
 
@@ -49,7 +51,8 @@ def upload(
             print("YouTube credentials missing; skipping upload")
             return None
         flow = InstalledAppFlow.from_client_secrets_file(
-            str(client_secrets_file), SCOPES
+            str(client_secrets_file),
+            YOUTUBE_OAUTH_SCOPES,
         )
         creds = flow.run_local_server(port=0)
         if token_file:
@@ -69,4 +72,3 @@ def upload(
     except Exception as exc:  # pragma: no cover - handled gracefully
         print(f"YouTube upload failed: {exc}")
         return None
-

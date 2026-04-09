@@ -10,7 +10,6 @@ import {
   canApproveStory,
   canGenerateScript,
   canRejectStory,
-  findNextReviewStoryId,
   findNextStoryWithStatus,
   STATUS_LABELS,
   statusTone,
@@ -70,8 +69,8 @@ export default function ReviewBar({
         queryKey: ["stories", "review-next"],
         queryFn: () => listStories({ limit: 200 }),
       });
-      const nextStoryId = findNextReviewStoryId(stories, story.id);
-      navigate(nextStoryId ? `/story/${nextStoryId}/review` : "/inbox");
+      const nextStoryId = findNextStoryWithStatus(stories, story.id, "ingested");
+      navigate(nextStoryId ? `/story/${nextStoryId}/review` : "/inbox?status=ingested");
     });
   };
 

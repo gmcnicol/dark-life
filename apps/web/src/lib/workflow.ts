@@ -135,22 +135,28 @@ export function statusTone(
 export function nextWorkspaceRoute(
   status: StoryStatus,
   storyId: number,
-  hasBundle = false,
+  _hasBundle = false,
 ): string {
-  if (status === "ingested" || status === "generating_script" || status === "scripted") {
+  if (status === "ingested" || status === "generating_script") {
     return `/story/${storyId}/review`;
+  }
+  if (status === "scripted") {
+    return `/story/${storyId}/split`;
   }
   if (status === "approved") {
     return `/story/${storyId}/media`;
   }
-  if (status === "media_ready") {
+  if (
+    status === "media_ready" ||
+    status === "queued" ||
+    status === "rendering" ||
+    status === "rendered" ||
+    status === "publish_ready"
+  ) {
     return `/story/${storyId}/queue`;
   }
-  if (status === "queued" || status === "rendering" || status === "rendered") {
+  if (status === "published") {
     return `/story/${storyId}/jobs`;
-  }
-  if (status === "publish_ready" || status === "published") {
-    return hasBundle ? `/story/${storyId}/jobs` : `/story/${storyId}/review`;
   }
   return `/story/${storyId}/review`;
 }
@@ -166,4 +172,18 @@ export function findNextStoryWithStatus(
       ? [...stories.slice(currentIndex + 1), ...stories.slice(0, currentIndex)]
       : stories;
   return ordered.find((story) => story.id !== currentId && story.status === targetStatus)?.id ?? null;
+}
+
+export function findNextStoryWithStatuses(
+  stories: Array<{ id: number; status: StoryStatus }>,
+  currentId: number,
+  targetStatuses: StoryStatus[],
+): number | null {
+  const allowed = new Set(targetStatuses);
+  const currentIndex = stories.findIndex((story) => story.id === currentId);
+  const ordered =
+    currentIndex >= 0
+      ? [...stories.slice(currentIndex + 1), ...stories.slice(0, currentIndex)]
+      : stories;
+  return ordered.find((story) => story.id !== currentId && allowed.has(story.status))?.id ?? null;
 }

@@ -133,6 +133,9 @@ export interface Release {
   artifact_path?: string | null;
   signed_asset_url?: string | null;
   publish_job_id?: number | null;
+  latest_metrics_sync_at?: string | null;
+  latest_metrics?: Record<string, number> | null;
+  latest_derived_metrics?: Record<string, number> | null;
   early_signal?: {
     window_hours: number;
     state: "monitor" | "flat" | "winner" | string;
@@ -238,6 +241,23 @@ export interface MetricsSnapshot {
   source: string;
   metrics: Record<string, unknown>;
   derived_metrics?: Record<string, unknown> | null;
+  captured_at?: string | null;
+}
+
+export interface InsightsSummary {
+  tracked_releases: number;
+  published_today: number;
+  winners: number;
+  monitor: number;
+  flat: number;
+  awaiting_metrics: number;
+  stale_sync: number;
+  last_sync_at?: string | null;
+}
+
+export interface ReleaseInsightsHistory {
+  release: Release;
+  snapshots: MetricsSnapshot[];
 }
 
 export interface AnalysisReport {
@@ -290,6 +310,12 @@ export interface PublishPlatformSettings {
   available_platforms: string[];
   active_platforms: string[];
   weekly_supported_platforms: string[];
+  short_slots_utc: string[];
+}
+
+export interface ReleaseRescheduleResult {
+  total_rescheduled: number;
+  releases: Release[];
 }
 
 export async function listStories(params: { status?: string; page?: number; limit?: number } = {}): Promise<Story[]> {
@@ -544,6 +570,18 @@ export async function listReleaseQueue(): Promise<Release[]> {
   return apiFetch<Release[]>("/releases/queue");
 }
 
+export async function listInsightsReleases(days = 30): Promise<Release[]> {
+  return apiFetch<Release[]>(`/insights/releases?days=${days}`);
+}
+
+export async function getInsightsSummary(days = 30): Promise<InsightsSummary> {
+  return apiFetch<InsightsSummary>(`/insights/summary?days=${days}`);
+}
+
+export async function getReleaseInsightsHistory(releaseId: number, hours = 24 * 7): Promise<ReleaseInsightsHistory> {
+  return apiFetch<ReleaseInsightsHistory>(`/insights/releases/${releaseId}/history?hours=${hours}`);
+}
+
 export async function approveRelease(
   releaseId: number,
   payload: {
@@ -579,6 +617,12 @@ export async function completeManualPublish(
 
 export async function clearRelease(releaseId: number): Promise<Release> {
   return apiFetch<Release>(`/releases/${releaseId}/clear`, {
+    method: "POST",
+  });
+}
+
+export async function rescheduleReleaseQueue(): Promise<ReleaseRescheduleResult> {
+  return apiFetch<ReleaseRescheduleResult>("/releases/reschedule", {
     method: "POST",
   });
 }

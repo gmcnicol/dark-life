@@ -45,7 +45,7 @@ def test_generate_script_payload_uses_serial_chapter_prompt(monkeypatch):
     payload = captured["payload"]
     assert payload["model"] == "gpt-5-mini"
     prompt = payload["input"][0]["content"][0]["text"]
-    assert "5 to 7 shorts/reels" in prompt
+    assert "as few shorts/reels as needed" in prompt
     assert "The full story must stay coherent" in prompt
     assert "separated by a blank line" in prompt
     assert "'I remember'" in prompt
@@ -85,3 +85,19 @@ def test_script_part_specs_preserve_chapter_breaks():
     assert len(parts) == 5
     assert parts[0][0].startswith("Something was already in the house.")
     assert parts[-1][0].endswith("I should have kept the lights on.")
+
+
+def test_script_part_specs_preserve_all_explicit_chapters():
+    script = ScriptVersion(
+        story_id=1,
+        source_text="source",
+        hook="Do not skip this.",
+        narration_text="\n\n".join(f"Chapter {index} body." for index in range(1, 9)),
+        outro="That was the whole mistake.",
+    )
+
+    parts = pipeline._script_part_specs(script)
+
+    assert len(parts) == 8
+    assert parts[0][0].startswith("Do not skip this.")
+    assert parts[-1][0].endswith("That was the whole mistake.")

@@ -5,6 +5,7 @@ import BoardRoute from "@/routes/board";
 import DashboardRoute from "@/routes/dashboard";
 import ExperimentsRoute from "@/routes/experiments";
 import InboxRoute from "@/routes/inbox";
+import InsightsRoute from "@/routes/insights";
 import JobsRoute from "@/routes/jobs";
 import PublishRoute from "@/routes/publish";
 import SettingsRoute from "@/routes/settings";
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="/experiments" element={<ExperimentsRoute />} />
           <Route path="/board" element={<BoardRoute />} />
           <Route path="/jobs" element={<JobsRoute />} />
+          <Route path="/insights" element={<InsightsRoute />} />
           <Route path="/publish" element={<PublishRoute />} />
           <Route path="/settings" element={<SettingsRoute />} />
           <Route path="/story/:id" element={<StoryLayoutRoute />}>

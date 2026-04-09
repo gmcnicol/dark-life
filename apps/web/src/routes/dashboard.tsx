@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { enqueueRedditIncremental, listReleaseQueue, listStories } from "@/lib/stories";
+import { enqueueRedditIncremental, getInsightsSummary, getPublishPlatformSettings, listReleaseQueue, listStories } from "@/lib/stories";
+import { buildQueueRunwaySummary } from "@/lib/publish-planning";
 import { STATUS_LABELS, nextWorkspaceRoute, statusTone } from "@/lib/workflow";
 import {
   ActionButton,
@@ -42,6 +43,14 @@ export default function DashboardRoute() {
   const [subredditInput, setSubredditInput] = useState("");
   const storiesQuery = useQuery({ queryKey: ["stories"], queryFn: () => listStories({ limit: 100 }) });
   const releasesQuery = useQuery({ queryKey: ["release-queue"], queryFn: listReleaseQueue });
+  const insightsSummaryQuery = useQuery({
+    queryKey: ["insights-summary"],
+    queryFn: () => getInsightsSummary(30),
+  });
+  const publishSettingsQuery = useQuery({
+    queryKey: ["publish-platform-settings"],
+    queryFn: getPublishPlatformSettings,
+  });
   const ingestMutation = useMutation({
     mutationFn: async () => {
       const subreddits = subredditInput
@@ -59,22 +68,18 @@ export default function DashboardRoute() {
   const stories = storiesQuery.data ?? [];
   const releaseQueue = releasesQuery.data ?? [];
   const now = new Date();
-  const counts = stories.reduce<Record<string, number>>((acc, story) => {
-    acc[story.status] = (acc[story.status] ?? 0) + 1;
-    return acc;
-  }, {});
 
   const activeStories = stories
     .filter((story) => !["published", "rejected"].includes(story.status))
     .sort((a, b) => a.id - b.id);
 
+  const insightsSummary = insightsSummaryQuery.data;
   const scheduledToday = releaseQueue.filter((release) => isSameUtcDay(release.publish_at, now)).length;
-  const publishedRecent = releaseQueue.filter(
-    (release) => release.status === "published" && Boolean(release.early_signal),
-  ).length;
-  const winners = releaseQueue.filter((release) => release.early_signal?.state === "winner").length;
-  const flats = releaseQueue.filter((release) => release.early_signal?.state === "flat").length;
+  const publishedRecent = insightsSummary?.published_today ?? 0;
+  const winners = insightsSummary?.winners ?? 0;
+  const flats = insightsSummary?.flat ?? 0;
   const pulseReleases = releaseQueue.filter((release) => Boolean(release.early_signal));
+  const runway = buildQueueRunwaySummary(releaseQueue, stories, publishSettingsQuery.data);
 
   return (
     <div className="space-y-6">
@@ -89,6 +94,12 @@ export default function DashboardRoute() {
               className="inline-flex items-center justify-center rounded-full bg-[linear-gradient(135deg,#8be9fd,#56d6ff)] px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_12px_30px_rgba(86,214,255,0.25)] transition hover:-translate-y-0.5"
             >
               Open inbox
+            </Link>
+            <Link
+              to="/insights"
+              className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/12"
+            >
+              Open insights
             </Link>
             <Link
               to="/board"
@@ -106,6 +117,8 @@ export default function DashboardRoute() {
               { label: "Published < 4h", value: publishedRecent },
               { label: "Winners", value: winners },
               { label: "Flat", value: flats },
+              { label: "Days queued", value: runway.queuedDays.toFixed(1) },
+              { label: "Stories needed", value: runway.storiesNeededApprox },
             ].map((item) => (
               <div key={item.label} className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-white/8 bg-white/[0.04] px-4 py-3">
                 <span className="text-sm text-[var(--text-soft)]">{item.label}</span>
@@ -122,6 +135,20 @@ export default function DashboardRoute() {
         <MetricCard label="Early winners" value={releasesQuery.isLoading ? "…" : winners} detail="Posts worth extending into a rewrite, new angle, or series." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
         <MetricCard label="Flat posts" value={releasesQuery.isLoading ? "…" : flats} detail="Posts to mentally discard and leave alone instead of obsessing over." timestamp={telemetryTimestampLabel(releasesQuery.dataUpdatedAt)} />
       </section>
+
+      <Panel className="space-y-3 p-4">
+        <SectionHeading
+          eyebrow="Queue runway"
+          title={`${runway.queuedDays.toFixed(1)} days queued at ${runway.slotsPerDay} shorts/day`}
+          description={`Target is about ${runway.targetDays} days. At the current queue mix you need roughly ${runway.storiesNeededApprox} more reviewed stor${runway.storiesNeededApprox === 1 ? "y" : "ies"} to get there.`}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone="accent">{runway.queuedShorts} shorts queued</StatusBadge>
+          <StatusBadge tone="neutral">{runway.reviewableStoriesNow} ingested ready now</StatusBadge>
+          <StatusBadge tone="warning">{runway.shortageShorts} shorts short of target</StatusBadge>
+          <StatusBadge tone="neutral">Avg {runway.averageShortsPerStory.toFixed(1)} shorts/story</StatusBadge>
+        </div>
+      </Panel>
 
       <Panel className="space-y-4">
         <SectionHeading
@@ -185,7 +212,7 @@ export default function DashboardRoute() {
         </div>
       </Panel>
 
-      {(storiesQuery.isLoading || releasesQuery.isLoading) ? (
+      {(storiesQuery.isLoading || releasesQuery.isLoading || publishSettingsQuery.isLoading || insightsSummaryQuery.isLoading) ? (
         <LoadingState label="Loading dashboard queues…" className="min-h-64" />
       ) : (
       <section className="grid gap-4 xl:grid-cols-[1.3fr_0.9fr]">

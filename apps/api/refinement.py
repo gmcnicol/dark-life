@@ -53,8 +53,9 @@ PROMPT_DEFAULTS: dict[str, dict[str, Any]] = {
     "generator": {
         "version_label": "gen_prompt_v1",
         "body": (
-            "Generate 5-part first-person horror serial candidates for short-form vertical video. "
-            "Return strict JSON. Each candidate must include hook, narration_text, outro, and exactly 5 episodes. "
+            "Generate first-person horror serial candidates for short-form vertical video. "
+            "Return strict JSON. Each candidate must include hook, narration_text, outro, and episodes. "
+            "Use the minimum number of episodes needed to tell the full story cleanly and completely. "
             "Each episode needs: episode_type, body_md, hook, lines, loop_line. Use plain, detached tone."
         ),
         "config": {"candidate_count": settings.REFINEMENT_DEFAULT_BATCH_SIZE},
@@ -77,8 +78,8 @@ PROMPT_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "template": {
         "version_label": "template_v1",
-        "body": "HOOK -> ESCALATION -> ESCALATION/CONFIRMATION -> SHIFT -> REVEAL/CLIFFHANGER with a loop line in every episode.",
-        "config": {"episodes": 5},
+        "body": "HOOK -> ESCALATION -> SHIFT -> REVEAL/CLIFFHANGER, extended only when the story needs extra beats, with a loop line in every episode.",
+        "config": {"episodes": "dynamic"},
     },
     "selection_policy": {
         "version_label": "selection_policy_v1",
@@ -429,8 +430,7 @@ def generate_candidate_payloads(
                         "outro": {"type": "string"},
                         "episodes": {
                             "type": "array",
-                            "minItems": 5,
-                            "maxItems": 5,
+                            "minItems": 1,
                             "items": {
                                 "type": "object",
                                 "properties": {

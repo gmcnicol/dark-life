@@ -426,6 +426,9 @@ class ReleaseRead(ReleaseBase):
     artifact_path: str | None = None
     signed_asset_url: str | None = None
     publish_job_id: int | None = None
+    latest_metrics_sync_at: datetime | None = None
+    latest_metrics: dict[str, float] | None = None
+    latest_derived_metrics: dict[str, float] | None = None
     early_signal: ReleaseEarlySignalRead | None = None
 
 

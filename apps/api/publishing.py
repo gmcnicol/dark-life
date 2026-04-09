@@ -15,7 +15,17 @@ from sqlmodel import Session, select
 from shared.config import settings
 from shared.workflow import PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus, RenderVariant
 
-from .models import PublishJob, Release, ReleaseEarlySignalRead, ReleaseRead, RenderArtifact, Story, StudioSetting
+from .models import (
+    MetricsSnapshot,
+    PublishJob,
+    Release,
+    ReleaseEarlySignalRead,
+    ReleaseRead,
+    RenderArtifact,
+    Story,
+    StudioSetting,
+)
+from .refinement import compute_derived_metrics
 
 
 AUTOMATED_PLATFORMS = {"youtube", "instagram"}
@@ -148,11 +158,15 @@ def resolve_publish_job(session: Session, release_id: int) -> PublishJob | None:
 def release_read(session: Session, release: Release) -> ReleaseRead:
     artifact = resolve_release_artifact(session, release)
     publish_job = resolve_publish_job(session, release.id or 0) if release.id else None
+    snapshot = latest_release_snapshot(session, release.id or 0) if release.id else None
     payload = release.model_dump()
     payload["artifact_path"] = artifact.video_path if artifact else None
     payload["signed_asset_url"] = build_signed_artifact_url(release_id=release.id) if artifact and release.id else None
     payload["publish_job_id"] = publish_job.id if publish_job else None
-    payload["early_signal"] = _build_release_early_signal(release)
+    payload["latest_metrics_sync_at"] = snapshot.captured_at if snapshot else None
+    payload["latest_metrics"] = _snapshot_metrics_payload(snapshot) if snapshot else None
+    payload["latest_derived_metrics"] = _snapshot_derived_payload(snapshot) if snapshot else None
+    payload["early_signal"] = _build_release_early_signal(release, snapshot=snapshot)
     return ReleaseRead.model_validate(payload)
 
 
@@ -309,9 +323,15 @@ def short_release_schedule(session: Session, *, count: int, now: datetime | None
     platforms = active_publish_platforms(session)
     anchor = _latest_release_time(session, variant=RenderVariant.SHORT.value, platforms=platforms)
     base = max([candidate for candidate in [anchor, now, datetime.now(timezone.utc)] if candidate is not None])
+    return short_release_schedule_from(base, count=count)
+
+
+def short_release_schedule_from(anchor: datetime, *, count: int) -> list[datetime]:
+    if count <= 0:
+        return []
     slots = _shorts_publish_slots()
     scheduled: list[datetime] = []
-    cursor = base.astimezone(timezone.utc)
+    cursor = anchor.astimezone(timezone.utc)
     while len(scheduled) < count:
         day_start = cursor.replace(hour=0, minute=0, second=0, microsecond=0)
         for hour, minute in slots:
@@ -342,14 +362,68 @@ def _release_metrics_payload(release: Release) -> dict[str, float]:
     }
 
 
-def _build_release_early_signal(release: Release) -> ReleaseEarlySignalRead | None:
+def latest_release_snapshot(session: Session, release_id: int) -> MetricsSnapshot | None:
+    return session.exec(
+        select(MetricsSnapshot)
+        .where(
+            MetricsSnapshot.release_id == release_id,
+            MetricsSnapshot.source == "youtube_insights",
+        )
+        .order_by(MetricsSnapshot.captured_at.desc(), MetricsSnapshot.id.desc())
+    ).first()
+
+
+def _snapshot_metrics_payload(snapshot: MetricsSnapshot | None) -> dict[str, float]:
+    if snapshot is None or not isinstance(snapshot.metrics, dict):
+        return {}
+    return {
+        "impressions": float(snapshot.metrics.get("impressions") or snapshot.metrics.get("views") or 0.0),
+        "views": float(snapshot.metrics.get("views") or 0.0),
+        "avg_view_duration": float(snapshot.metrics.get("avg_view_duration") or 0.0),
+        "percent_viewed": float(snapshot.metrics.get("percent_viewed") or 0.0),
+        "completion_rate": float(snapshot.metrics.get("completion_rate") or 0.0),
+        "likes": float(snapshot.metrics.get("likes") or 0.0),
+        "comments": float(snapshot.metrics.get("comments") or 0.0),
+        "shares": float(snapshot.metrics.get("shares") or 0.0),
+        "subs_gained": float(snapshot.metrics.get("subs_gained") or 0.0),
+    }
+
+
+def _snapshot_derived_payload(snapshot: MetricsSnapshot | None) -> dict[str, float]:
+    if snapshot is None or not isinstance(snapshot.derived_metrics, dict):
+        return {}
+    payload: dict[str, float] = {}
+    for key, value in snapshot.derived_metrics.items():
+        try:
+            payload[key] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return payload
+
+
+def _build_release_early_signal(
+    release: Release,
+    *,
+    snapshot: MetricsSnapshot | None = None,
+) -> ReleaseEarlySignalRead | None:
     if release.variant != RenderVariant.SHORT.value or release.status != ReleaseStatus.PUBLISHED.value:
         return None
     anchor = release.published_at
     if anchor is None:
         return None
 
-    metrics = _release_metrics_payload(release)
+    metrics = _snapshot_metrics_payload(snapshot) if snapshot else _release_metrics_payload(release)
+    has_metrics = any(value > 0 for value in metrics.values())
+    if snapshot is None and not has_metrics:
+        return ReleaseEarlySignalRead(
+            window_hours=settings.EARLY_SIGNAL_WINDOW_HOURS,
+            state="monitor",
+            score=0.0,
+            recommended_action="Await metrics sync",
+            summary="Published, but YouTube metrics have not synced into the operator surface yet.",
+            evaluated_at=None,
+            metrics=metrics,
+        )
     now = datetime.now(timezone.utc)
     hours_since = max(0.0, (now - anchor.astimezone(timezone.utc)).total_seconds() / 3600)
     views = metrics["views"]
@@ -359,8 +433,12 @@ def _build_release_early_signal(release: Release) -> ReleaseEarlySignalRead | No
     comments = metrics["comments"]
     shares = metrics["shares"]
 
-    retention_score = (percent_viewed * 0.55) + (completion_rate * 0.45)
-    interaction_score = ((likes + comments * 2 + shares * 3) / max(views, 1.0)) * 100 if views > 0 else 0.0
+    derived = _snapshot_derived_payload(snapshot) if snapshot else compute_derived_metrics(metrics)
+    retention_score = float(derived.get("retention_score") or ((percent_viewed * 0.55) + (completion_rate * 0.45)))
+    interaction_score = float(
+        derived.get("engagement_score")
+        or (((likes + comments * 2 + shares * 3) / max(views, 1.0)) * 100 if views > 0 else 0.0)
+    )
     velocity_score = min(100.0, views / 40.0)
     score = round(retention_score * 0.45 + interaction_score * 0.3 + velocity_score * 0.25, 2)
 
@@ -387,7 +465,8 @@ def _build_release_early_signal(release: Release) -> ReleaseEarlySignalRead | No
         score=score,
         recommended_action=action,
         summary=summary,
-        evaluated_at=anchor.astimezone(timezone.utc) + timedelta(hours=settings.EARLY_SIGNAL_WINDOW_HOURS),
+        evaluated_at=(snapshot.captured_at if snapshot else None)
+        or (anchor.astimezone(timezone.utc) + timedelta(hours=settings.EARLY_SIGNAL_WINDOW_HOURS)),
         metrics=metrics,
     )
 

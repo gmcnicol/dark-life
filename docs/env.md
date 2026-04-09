@@ -92,7 +92,8 @@ If you want Docker runs to be self-contained within this repo, copy the runtime 
 
 ## Uploads
 - `YOUTUBE_CLIENT_SECRETS_FILE` – path to YouTube OAuth client secrets
-- `YOUTUBE_TOKEN_FILE` – path to stored YouTube OAuth token
+- `YOUTUBE_TOKEN_FILE` – path to stored YouTube OAuth token. The token must be minted with upload plus read scopes for publisher and insights:
+  `youtube.upload`, `youtube.readonly`, and `yt-analytics.readonly`
 
 ## Secret Consumption
 - `API_AUTH_TOKEN` – attached to renderer API calls in [`services/renderer/poller.py`](../services/renderer/poller.py)

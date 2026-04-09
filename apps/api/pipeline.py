@@ -33,8 +33,6 @@ SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 CHAPTER_BREAK_RE = re.compile(r"\n\s*\n+")
 WORDS_PER_SECOND = 2.6
 SHORT_TARGET_SECONDS = 55
-SERIES_MIN_PARTS = 5
-SERIES_MAX_PARTS = 7
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".webm"}
 STOPWORDS = {
@@ -125,11 +123,12 @@ def generate_script_payload(story: Story) -> dict[str, str]:
 
     prompt = (
         "You are the head writer for Dark Life Stories, creating premium horror narration for short-form vertical video. "
-        "Rewrite the source into an aggressive, highly engaging first-person narrative built to serialize across 5 to 7 shorts/reels. "
+        "Rewrite the source into an aggressive, highly engaging first-person narrative built to serialize across as few shorts/reels as needed while still telling the complete story. "
         "Return strict JSON with keys hook, narration_text, outro. "
         "Requirements: "
         "hook must be 1 to 2 sentences and hit immediately with tension, curiosity, and danger. "
-        "narration_text must be exactly 5 to 7 paragraphs, with each paragraph functioning as one short-form chapter and separated by a blank line. "
+        "narration_text must be split into paragraphs separated by a blank line, with each paragraph functioning as one short-form chapter. "
+        "Use the minimum number of chapters that keeps the full story coherent, complete, and easy to follow. "
         "The full story must stay coherent, logically consistent, and emotionally readable from beginning to end. "
         "Each chapter should escalate the situation, feel easy to narrate aloud, and ideally close on a reveal, reversal, question, or forward pull that makes people want the next part, but never at the expense of clarity or coherence. "
         "Preserve the core plot and emotional truth, but sharpen pacing, imagery, and suspense so it feels cinematic and addictive. "
@@ -208,7 +207,7 @@ def _script_part_specs(script: ScriptVersion, target_seconds: int = SHORT_TARGET
         for segment in CHAPTER_BREAK_RE.split((script.narration_text or "").strip())
         if segment.strip()
     ]
-    if SERIES_MIN_PARTS <= len(chapters) <= SERIES_MAX_PARTS:
+    if len(chapters) > 1:
         if script.hook.strip():
             chapters[0] = f"{script.hook.strip()} {chapters[0]}".strip()
         if script.outro.strip():

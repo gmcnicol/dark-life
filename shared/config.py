@@ -179,6 +179,18 @@ class Settings(BaseSettings):
         default=3,
         description="Polite request rate limit (requests per second)",
     )
+    INSIGHTS_SYNC_INTERVAL_SEC: int = Field(
+        default=3600,
+        description="Polling interval for release insights collection in seconds",
+    )
+    INSIGHTS_LOOKBACK_DAYS: int = Field(
+        default=30,
+        description="How many days of published YouTube releases to track in insights",
+    )
+    INSIGHTS_BATCH_LIMIT: int = Field(
+        default=50,
+        description="Maximum number of published releases fetched per insights sync pass",
+    )
     TTS_SPEAKING_STYLE: float = Field(
         default=0.0,
         description="Speaking style intensity (0-100)",
