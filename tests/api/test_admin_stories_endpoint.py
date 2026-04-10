@@ -90,3 +90,30 @@ def test_upsert_story_updates(client: TestClient):
     res2 = client.post("/admin/stories", json=payload, headers=headers)
     assert res2.status_code == 200
     assert res2.json()["title"] == "New Title"
+
+
+def test_upsert_story_rejects_same_title_author_and_content(client: TestClient):
+    headers = {"Authorization": "Bearer token"}
+    first_payload = {
+        "external_id": "abc123",
+        "source": "reddit",
+        "title": "  Test Story ",
+        "author": "Me",
+        "created_utc": 0,
+        "text": "hello\n\nthere",
+    }
+    second_payload = {
+        "external_id": "def456",
+        "source": "reddit",
+        "title": "test story",
+        "author": "me",
+        "created_utc": 1,
+        "text": "hello there",
+    }
+
+    res = client.post("/admin/stories", json=first_payload, headers=headers)
+    assert res.status_code == 201
+
+    res2 = client.post("/admin/stories", json=second_payload, headers=headers)
+    assert res2.status_code == 409
+    assert res2.json()["detail"] == "duplicate"

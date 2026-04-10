@@ -69,6 +69,7 @@ from .pipeline import (
     upsert_script,
 )
 from .script_refinement import enqueue_compat_script_generation, run_compat_script_generation
+from .story_duplicates import find_duplicate_story
 
 router = APIRouter(tags=["stories"])
 logger = logging.getLogger(__name__)
@@ -639,6 +640,17 @@ def get_story(story_id: int, session: Session = Depends(get_session)) -> Story:
 def create_story(story_in: StoryCreate, session: Session = Depends(get_session)) -> Story:
     payload = story_in.model_dump()
     payload.setdefault("status", StoryStatus.INGESTED.value)
+    duplicate = find_duplicate_story(
+        session,
+        title=payload.get("title"),
+        author=payload.get("author"),
+        body_md=payload.get("body_md"),
+    )
+    if duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "duplicate", "story_id": duplicate.id},
+        )
     story = Story(**payload)
     session.add(story)
     session.commit()

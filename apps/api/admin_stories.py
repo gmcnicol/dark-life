@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 
 from .db import get_session
 from .models import Story
+from .story_duplicates import find_duplicate_story
 
 router = APIRouter(prefix="/admin/stories", tags=["admin-stories"])
 
@@ -71,6 +72,17 @@ def upsert_story(
             session.refresh(story)
             return story
         return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": "duplicate"})
+    duplicate = find_duplicate_story(
+        session,
+        title=payload.title,
+        author=payload.author,
+        body_md=payload.text,
+    )
+    if duplicate:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "duplicate", "story_id": duplicate.id},
+        )
     story = Story(
         external_id=payload.external_id,
         source=payload.source,

@@ -71,6 +71,41 @@ def test_generate_script_and_parts(client):
     assert len(parts.json()) >= 1
 
 
+def test_create_story_rejects_same_title_author_and_content(client):
+    client, _engine = client
+
+    first = client.post(
+        "/stories",
+        json={
+            "title": "  My Story ",
+            "author": "Alice",
+            "body_md": "I heard a noise.\n\nThen I opened the door.",
+        },
+    )
+    assert first.status_code == 201
+
+    duplicate = client.post(
+        "/stories",
+        json={
+            "title": "my story",
+            "author": "alice",
+            "body_md": "I heard a noise. Then I opened the door.",
+        },
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["detail"] == "duplicate"
+
+    different_author = client.post(
+        "/stories",
+        json={
+            "title": "My Story",
+            "author": "Bob",
+            "body_md": "I heard a noise. Then I opened the door.",
+        },
+    )
+    assert different_author.status_code == 201
+
+
 def test_extract_image_keywords_biases_search_to_story_mood():
     story = Story(
         title="The Woman At My Window",
