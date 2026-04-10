@@ -21,7 +21,6 @@ This project uses the following environment variables. Copy `.env.example` to `.
 - `POSTGRES_PASSWORD` – Postgres password for Docker Compose
 - `POSTGRES_DB` – Postgres database name for Docker Compose
 - `DATABASE_URL` – SQLAlchemy connection string
-- `REDIS_URL` – Redis URL for legacy queue consumers and local tooling
 
 ## API access
 - `API_BASE_URL` – base URL of the API service

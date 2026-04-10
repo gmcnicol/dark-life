@@ -2,7 +2,6 @@ fastapi
 uvicorn[standard]
 sqlmodel
 psycopg[binary]>=3.1
-redis
 praw
 requests
 typer

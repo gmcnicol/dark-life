@@ -16,10 +16,10 @@ test:
 	uv run --with pytest,httpx pytest -q
 
 up:
-	$(COMPOSE) --profile renderer --profile publisher up -d --build postgres redis api web renderer publisher
+	$(COMPOSE) --profile renderer --profile publisher up -d --build postgres api web renderer publisher
 
 all-up:
-	$(COMPOSE) --profile renderer --profile publisher --profile scheduler up -d --build postgres redis api web renderer publisher scheduler
+	$(COMPOSE) --profile renderer --profile publisher --profile scheduler up -d --build postgres api web renderer publisher scheduler
 
 down:
 	$(COMPOSE) down

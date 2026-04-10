@@ -29,7 +29,6 @@ from typing import Optional
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@postgres:5432/darklife"
-    REDIS_URL: str = "redis://redis:6379/0"
 
     ADMIN_API_TOKEN: Optional[str] = None
 
@@ -121,7 +120,6 @@ echo ">> Normalizing .env for Docker compose"
 if [[ ! -f "$ENV_PATH" ]]; then
   cat > "$ENV_PATH" <<'ENVF'
 DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/darklife
-REDIS_URL=redis://redis:6379/0
 ENVF
   echo "   created .env with defaults"
 else
@@ -130,9 +128,6 @@ else
     sed -i.bak 's#^DATABASE_URL=.*#DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/darklife#' "$ENV_PATH"
   else
     echo 'DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/darklife' >> "$ENV_PATH"
-  fi
-  if ! grep -q '^REDIS_URL=' "$ENV_PATH"; then
-    echo 'REDIS_URL=redis://redis:6379/0' >> "$ENV_PATH"
   fi
   echo "   updated .env"
 fi
