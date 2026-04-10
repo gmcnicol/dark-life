@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:15
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -19,6 +20,7 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
     working_dir: /app/apps/api
     env_file: ../.env
     environment:
@@ -45,6 +47,7 @@ services:
       args:
         VITE_CLERK_ENABLED: ${VITE_CLERK_ENABLED:-false}
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
+    restart: unless-stopped
     env_file: ../.env
     environment:
       API_BASE_URL: ${API_BASE_URL:-http://api:8000}
@@ -66,6 +69,7 @@ services:
     build:
       context: ..
       dockerfile: services/renderer/Dockerfile
+    restart: unless-stopped
     command: python -u -m services.renderer.poller
     env_file: ../.env
     environment:
@@ -98,6 +102,7 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
     command: python -u -m services.refinement.poller
     env_file: ../.env
     environment:
@@ -121,6 +126,7 @@ services:
     build:
       context: ..
       dockerfile: services/renderer/Dockerfile
+    restart: unless-stopped
     command: python -u services/scheduler/main.py
     env_file: ../.env
     environment:
@@ -150,6 +156,7 @@ services:
     build:
       context: ..
       dockerfile: services/publisher/Dockerfile
+    restart: unless-stopped
     env_file: ../.env
     environment:
       SERVICE_NAME: publisher
@@ -174,6 +181,7 @@ services:
     build:
       context: ..
       dockerfile: services/insights/Dockerfile
+    restart: unless-stopped
     env_file: ../.env
     environment:
       SERVICE_NAME: insights
