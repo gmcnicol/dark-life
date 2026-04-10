@@ -44,9 +44,15 @@ def test_compile_short_render_with_music_and_burn(tmp_path):
     labels = [command.label for command in plan.commands]
     assert labels == ["mix_audio", "render_background", "mux_av", "burn_subtitles"]
     mix_audio = plan.commands[0]
+    render_background = plan.commands[1]
     mux_av = plan.commands[2]
     assert "sidechaincompress" in " ".join(mix_audio.args)
     assert "pan=stereo|c0=c0|c1=c0" in " ".join(mix_audio.args)
+    vf = render_background.args[render_background.args.index("-vf") + 1]
+    assert "crop=1080:1920" in vf
+    assert "sin(2*PI*t/42.000)" in vf
+    assert "x='if(gt(iw,ow),(iw-ow)/2+((iw-ow)/2)*0.35*sin(2*PI*t/42.000),0)'" in vf
+    assert "y='if(gt(ih,oh),(ih-oh)/2,0)'" in vf
     assert mux_av.args[mux_av.args.index("-ac") + 1] == "2"
     assert plan.artifacts.video_path == tmp_path / "output" / "video.mp4"
 

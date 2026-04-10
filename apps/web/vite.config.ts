@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 // @ts-expect-error Vite executes this runtime-only server helper directly from ESM.
 import { handleAdminProxy, isAdminProxyRequest } from "./server/admin-proxy.mjs";
+// @ts-expect-error Runtime-only ESM helper used to hydrate process.env for the dev proxy.
+import { loadAppEnv } from "./server/load-env.mjs";
+
+loadAppEnv();
 
 export default defineConfig({
   envDir: "../..",

@@ -10,6 +10,18 @@ from shared.config import settings
 from shared.logging import log_debug, log_error, log_info
 
 
+def background_filter(width: int, height: int, *, duration_sec: float) -> str:
+    safe_duration = max(duration_sec, 1.0)
+    center_y = "if(gt(ih,oh),(ih-oh)/2,0)"
+    pan_x = (
+        f"if(gt(iw,ow),(iw-ow)/2+((iw-ow)/2)*0.35*sin(2*PI*t/{safe_duration:.3f}),0)"
+    )
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height}:x='{pan_x}':y='{center_y}',setsar=1"
+    )
+
+
 def mux(video: Path, audio: Path, name: str) -> Path:
     """Mux ``video`` and ``audio`` into ``OUTPUT_DIR/<name>.mp4``.
 
@@ -98,10 +110,7 @@ def render_background(asset: Path, duration_ms: int, out_path: Path, *, preset: 
     fps = int(preset["fps"])
     duration = max(duration_ms / 1000.0, 1.0)
     ext = asset.suffix.lower()
-    vf = (
-        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},setsar=1"
-    )
+    vf = background_filter(width, height, duration_sec=duration)
     if ext in {".jpg", ".jpeg", ".png", ".webp"}:
         cmd = [
             "ffmpeg",
@@ -139,6 +148,50 @@ def render_background(asset: Path, duration_ms: int, out_path: Path, *, preset: 
             "yuv420p",
             str(out_path),
         ]
+    log_debug("ffmpeg_cmd", argv=cmd)
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return out_path
+
+
+def reframe_video_to_landscape(video: Path, out_path: Path, *, preset: dict[str, int | bool]) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    width = int(preset["width"])
+    height = int(preset["height"])
+    fps = int(preset["fps"])
+    filter_complex = (
+        "[0:v]split=2[bgsrc][fgsrc];"
+        f"[bgsrc]scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},boxblur=20:10[bg];"
+        f"[fgsrc]scale={width}:{height}:force_original_aspect_ratio=decrease[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]"
+    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(video),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[v]",
+        "-map",
+        "0:a?",
+        "-r",
+        str(fps),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-movflags",
+        "+faststart",
+        str(out_path),
+    ]
     log_debug("ffmpeg_cmd", argv=cmd)
     subprocess.run(cmd, capture_output=True, text=True, check=True)
     return out_path
@@ -192,4 +245,11 @@ def concat_videos(inputs: list[Path], out_path: Path) -> Path:
     return out_path
 
 
-__all__ = ["burn_subtitles", "concat_videos", "mux", "probe_duration_ms", "render_background"]
+__all__ = [
+    "burn_subtitles",
+    "concat_videos",
+    "mux",
+    "probe_duration_ms",
+    "reframe_video_to_landscape",
+    "render_background",
+]

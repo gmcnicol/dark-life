@@ -2,13 +2,13 @@
 
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
-import { type CSSProperties, useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import type { Release } from "@/lib/stories";
 import { approveRelease, clearRelease, completeManualPublish, retryRelease } from "@/lib/stories";
-import { ActionButton, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
+import { ActionButton, DataGridSurface, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 type QueueRow = Release & {
   platformLabel: string;
@@ -433,26 +433,7 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
           </p>
         </div>
 
-        <div
-          className="ag-theme-quartz-dark h-[34rem] min-h-[28rem] overflow-hidden rounded-[1.35rem] border border-white/10"
-          style={
-            {
-              width: "100%",
-              ["--ag-background-color" as string]: "rgba(10, 14, 22, 0.94)",
-              ["--ag-foreground-color" as string]: "rgb(241, 245, 249)",
-              ["--ag-header-background-color" as string]: "rgba(255, 255, 255, 0.03)",
-              ["--ag-header-foreground-color" as string]: "rgba(226, 232, 240, 0.74)",
-              ["--ag-row-hover-color" as string]: "rgba(56, 189, 248, 0.09)",
-              ["--ag-selected-row-background-color" as string]: "rgba(56, 189, 248, 0.16)",
-              ["--ag-border-color" as string]: "rgba(255, 255, 255, 0.08)",
-              ["--ag-row-border-color" as string]: "rgba(255, 255, 255, 0.06)",
-              ["--ag-odd-row-background-color" as string]: "rgba(255, 255, 255, 0.015)",
-              ["--ag-cell-horizontal-border" as string]: "transparent",
-              ["--ag-wrapper-border-radius" as string]: "1.35rem",
-              ["--ag-font-family" as string]: "inherit",
-            } as CSSProperties
-          }
-        >
+        <DataGridSurface className="h-[34rem] min-h-[28rem]">
           <AgGridReact<QueueRow>
             theme={"legacy"}
             rowData={filteredReleases}
@@ -473,7 +454,7 @@ export default function PublishQueue({ releases }: { releases: Release[] }) {
             }}
             getRowId={({ data }) => `${data.id}`}
           />
-        </div>
+        </DataGridSurface>
       </Panel>
 
       {selectedRelease ? (

@@ -83,11 +83,13 @@ def list_publish_jobs(
     query = select(PublishJob)
     if status:
         query = query.where(PublishJob.status == status)
-    query = query.order_by(PublishJob.id).limit(limit)
-    jobs = session.exec(query).all()
     if status == PublishJobStatus.QUEUED.value:
-        return [job for job in jobs if _job_due(job)]
-    return jobs
+        now = datetime.now(timezone.utc)
+        query = query.where(
+            (PublishJob.not_before.is_(None)) | (PublishJob.not_before <= now)
+        )
+    query = query.order_by(PublishJob.id).limit(limit)
+    return session.exec(query).all()
 
 
 @router.post("/{job_id}/claim")

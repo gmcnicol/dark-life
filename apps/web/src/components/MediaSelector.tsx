@@ -6,7 +6,17 @@ import { useNavigate } from "react-router-dom";
 import type { MediaRef, PublishPlatformSettings, Story, StoryPart } from "@/lib/stories";
 import { createAssetBundle, createShortReleases, indexStoryAssets, listStories } from "@/lib/stories";
 import { canManageMedia, findNextStoryWithStatus, STATUS_LABELS } from "@/lib/workflow";
-import { ActionButton, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
+import {
+  ActionButton,
+  EmptyState,
+  HintPanel,
+  PageActions,
+  PageStatusBar,
+  Panel,
+  SectionHeading,
+  StatusBadge,
+  SurfaceRail,
+} from "./ui-surfaces";
 
 export default function MediaSelector({
   story,
@@ -146,6 +156,16 @@ export default function MediaSelector({
           </div>
         </Panel>
 
+        <PageStatusBar>
+          {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+          {fetchNotice ? <StatusBadge tone="neutral">{fetchNotice}</StatusBadge> : null}
+          {!canSave ? (
+            <StatusBadge tone="warning">Media selection is locked for this status</StatusBadge>
+          ) : (
+            <StatusBadge tone="accent">Selection is editable</StatusBadge>
+          )}
+        </PageStatusBar>
+
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
           <div ref={gridRef} className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {catalogAssets.length === 0 ? (
@@ -246,14 +266,13 @@ export default function MediaSelector({
         </section>
       </div>
 
-      <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-        <Panel className="space-y-4 p-4">
-          <SectionHeading
-            eyebrow="Action rail"
-            title="Media handoff"
-            description="Keep the decisive action in the same place as review and script so the operator flow stays muscle-memory simple."
-          />
-          <div className="flex flex-col gap-3">
+      <SurfaceRail>
+        <HintPanel
+          eyebrow="Primary action"
+          title="Media handoff"
+          description="Keep the decisive action in the same place as review and script so the operator flow stays muscle-memory simple."
+        >
+          <PageActions>
             <ActionButton onClick={saveBundle} disabled={isPending || selected.length === 0 || !canSave}>
               {isPending ? "Queueing renders…" : "Queue renders and schedule"}
             </ActionButton>
@@ -263,19 +282,25 @@ export default function MediaSelector({
             <ActionButton onClick={refreshRemoteMatches} tone="secondary" disabled={isRefreshing}>
               {isRefreshing ? "Fetching Pixabay matches…" : "Fetch remote matches"}
             </ActionButton>
-          </div>
-        </Panel>
+          </PageActions>
+        </HintPanel>
 
-        <Panel className="space-y-3 p-4">
-          {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
-          {fetchNotice ? <StatusBadge tone="neutral">{fetchNotice}</StatusBadge> : null}
+        <HintPanel
+          eyebrow="What happens next"
+          title="Operator hint"
+          description="Choose assets in the grid, verify the preview map, then lock the bundle from this rail. Explanations live here instead of between cards."
+        >
           {!canSave ? (
             <p className="text-sm text-[var(--text-soft)]">
               Media selection unlocks after approval and freezes once renders have been queued.
             </p>
-          ) : null}
-        </Panel>
-      </div>
+          ) : (
+            <p className="text-sm text-[var(--text-soft)]">
+              Saving from this rail creates the asset bundle, queues short releases, and advances the workflow without another setup pass.
+            </p>
+          )}
+        </HintPanel>
+      </SurfaceRail>
     </div>
   );
 }

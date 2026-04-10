@@ -12,7 +12,7 @@ import {
   type MetricsSnapshot,
   type Release,
 } from "@/lib/stories";
-import { EmptyState, LoadingState, PageHeader, Panel, SectionHeading, StatusBadge } from "@/components/ui-surfaces";
+import { ActionLink, DataGridSurface, EmptyState, LoadingState, PageHeader, Panel, SectionHeading, StatusBadge } from "@/components/ui-surfaces";
 
 type InsightRow = Release & {
   releaseLabel: string;
@@ -185,18 +185,8 @@ export default function InsightsRoute() {
         description="Review the last 30 days of published YouTube Shorts in one dense table. Winners, flats, and stale syncs should be obvious without digging through provider dashboards."
         actions={
           <>
-            <Link
-              to="/publish"
-              className="inline-flex items-center justify-center rounded-full bg-[linear-gradient(135deg,#8be9fd,#56d6ff)] px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_12px_30px_rgba(86,214,255,0.25)] transition hover:-translate-y-0.5"
-            >
-              Open publish queue
-            </Link>
-            <Link
-              to="/dashboard"
-              className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/12"
-            >
-              Back to dashboard
-            </Link>
+            <ActionLink to="/publish">Open publish queue</ActionLink>
+            <ActionLink to="/dashboard" tone="secondary">Back to dashboard</ActionLink>
           </>
         }
         aside={
@@ -239,8 +229,9 @@ export default function InsightsRoute() {
         />
       ) : (
         <>
-          <div className="ag-theme-quartz-dark h-[34rem] min-h-[30rem] overflow-hidden rounded-[1.35rem] border border-white/10">
+          <DataGridSurface className="h-[34rem] min-h-[30rem]">
             <AgGridReact<InsightRow>
+              theme={"legacy"}
               rowData={rows}
               columnDefs={columns}
               defaultColDef={{
@@ -259,7 +250,7 @@ export default function InsightsRoute() {
               getRowId={({ data }) => String(data.id)}
               onRowClicked={(event: RowClickedEvent<InsightRow>) => setSelectedReleaseId(event.data?.id ?? null)}
             />
-          </div>
+          </DataGridSurface>
 
           {selectedRelease ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_22rem]">
@@ -336,18 +327,8 @@ export default function InsightsRoute() {
                       {selectedRelease.early_signal?.summary ?? "No hourly data has landed for this release yet."}
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      <Link
-                        to="/publish"
-                        className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/12"
-                      >
-                        Open publish queue
-                      </Link>
-                      <Link
-                        to={`/story/${selectedRelease.story_id}/jobs`}
-                        className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/12"
-                      >
-                        Open story
-                      </Link>
+                      <ActionLink to="/publish" tone="secondary">Open publish queue</ActionLink>
+                      <ActionLink to={`/story/${selectedRelease.story_id}/jobs`} tone="secondary">Open story</ActionLink>
                     </div>
                     <p className="text-sm text-[var(--text-soft)]">
                       7-day growth: {historyQuery.data ? compactNumber(recentGrowth(historyQuery.data.snapshots)) : "0"}

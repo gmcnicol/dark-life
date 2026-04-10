@@ -3,11 +3,23 @@
 import { useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { BionicReadingToggle, BionicText } from "@/components/bionic-text";
+import { BionicText } from "@/components/bionic-text";
+import { useReaderPreferences } from "@/lib/reader-preferences";
 import type { Story, StoryPart } from "@/lib/stories";
 import { listStories, updateStoryStatus } from "@/lib/stories";
 import { canRejectStory, canTransitionStory, findNextStoryWithStatus, STATUS_LABELS, statusTone } from "@/lib/workflow";
-import { ActionButton, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
+import {
+  ActionButton,
+  HintPanel,
+  PageActions,
+  PageStatusBar,
+  Panel,
+  ReaderControls,
+  SectionHeading,
+  StatusBadge,
+  SurfaceRail,
+  readerStyleVars,
+} from "./ui-surfaces";
 
 export default function SplitEditor({
   story,
@@ -21,6 +33,7 @@ export default function SplitEditor({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const { size, setSize, preset } = useReaderPreferences();
   const rows = parts.length > 0 ? parts.map((part) => part.body_md) : [story.body_md || ""];
   const canApproveForMedia =
     Boolean(story.active_script_version_id) &&
@@ -69,7 +82,13 @@ export default function SplitEditor({
         await queryClient.invalidateQueries({ queryKey: ["story-overview", story.id] });
         await queryClient.invalidateQueries({ queryKey: ["story", story.id] });
         await queryClient.invalidateQueries({ queryKey: ["stories"] });
+        const stories = await queryClient.fetchQuery({
+          queryKey: ["stories", "script-next"],
+          queryFn: () => listStories({ limit: 200 }),
+        });
+        const nextStoryId = findNextStoryWithStatus(stories, story.id, "scripted");
         setSuccess("Story rejected.");
+        navigate(nextStoryId ? `/story/${nextStoryId}/split` : "/inbox?status=scripted");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to reject story");
       }
@@ -85,6 +104,9 @@ export default function SplitEditor({
             title="Script blocks"
             description="Review the live script in reading order. Keep the vertical stack aligned with alternatives so block order is obvious without re-scanning the screen."
           />
+          <div className="rounded-[1.2rem] border border-white/8 bg-black/15 p-4">
+            <ReaderControls size={size} onSizeChange={setSize} compact />
+          </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <StatusBadge tone={statusTone(story.status)}>{STATUS_LABELS[story.status]}</StatusBadge>
@@ -92,6 +114,16 @@ export default function SplitEditor({
             <StatusBadge tone="neutral">{totalSeconds}s total</StatusBadge>
           </div>
         </Panel>
+
+        <PageStatusBar>
+          {success ? <StatusBadge tone="success">{success}</StatusBadge> : null}
+          {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+          {!canApproveForMedia ? (
+            <StatusBadge tone="warning">Needs active draft and reviewable status</StatusBadge>
+          ) : (
+            <StatusBadge tone="accent">Ready for media handoff</StatusBadge>
+          )}
+        </PageStatusBar>
 
         <Panel className="space-y-5">
           {rows.map((row, index) => {
@@ -116,7 +148,9 @@ export default function SplitEditor({
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
                     Script block
                   </p>
-                  <BionicText text={row} className="text-[1.08rem] leading-9 text-[var(--text-soft)]" />
+                  <div style={readerStyleVars(preset.fontSize, preset.lineHeight)}>
+                    <BionicText text={row} className="reader-copy text-[var(--text-soft)]" />
+                  </div>
                 </div>
               </div>
             );
@@ -124,14 +158,13 @@ export default function SplitEditor({
         </Panel>
       </div>
 
-      <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-        <Panel className="space-y-4 p-4">
-          <SectionHeading
-            eyebrow="Action rail"
-            title="Script decisions"
-            description="Keep the primary action in the same place as review so you can scan, decide, and move on without hunting for controls."
-          />
-          <div className="flex flex-col gap-3">
+      <SurfaceRail>
+        <HintPanel
+          eyebrow="Primary action"
+          title="Script decisions"
+          description="Approve from the same rail used across the workspace. Secondary routes stay below the forward action so the next move is always obvious."
+        >
+          <PageActions>
             <ActionButton onClick={handleApproveForMedia} disabled={isPending || !canApproveForMedia}>
               {isPending ? "Approving…" : "Approve for media"}
             </ActionButton>
@@ -139,25 +172,30 @@ export default function SplitEditor({
               to={`/story/${story.id}/refinement`}
               className="inline-flex items-center justify-center rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-white transition hover:border-white/14 hover:bg-white/[0.05]"
             >
-              Generate alternatives
+              Open alternatives
             </Link>
             <ActionButton onClick={handleReject} tone="danger" disabled={isPending || !canReject}>
               Reject story
             </ActionButton>
-          </div>
-        </Panel>
+          </PageActions>
+        </HintPanel>
 
-        <Panel className="space-y-3 p-4">
-          <BionicReadingToggle />
-          {success ? <StatusBadge tone="success">{success}</StatusBadge> : null}
-          {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+        <HintPanel
+          eyebrow="What happens next"
+          title="Workflow hint"
+          description="Keep the main column for reading. Use the rail for what to do next and why something may be unavailable."
+        >
           {!canApproveForMedia ? (
             <p className="text-sm text-[var(--text-soft)]">
               This script cannot move to media until it has an active draft and is still in a reviewable stage.
             </p>
-          ) : null}
-        </Panel>
-      </div>
+          ) : (
+            <p className="text-sm text-[var(--text-soft)]">
+              Once approved, this story moves cleanly into media selection and the next scripted story becomes the active workspace.
+            </p>
+          )}
+        </HintPanel>
+      </SurfaceRail>
     </div>
   );
 }

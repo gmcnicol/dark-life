@@ -145,22 +145,15 @@ export default function ReviewBar({
           {activeScript ? (
             <div className="mt-3 space-y-3">
               <p className="text-sm leading-6 text-[var(--text-soft)]">
-                If the generated draft is good, move forward into script. Use alternatives only when the draft quality is weak and you need another pass.
+                If the generated draft is good, move forward into script. Keep review focused on approval or rejection, then use Alternatives later from the script stage if you need another pass.
               </p>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2">
                 <Link
                   to={`/story/${story.id}/split`}
                   className="rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3 transition hover:border-white/14 hover:bg-white/[0.05]"
                 >
                   <p className="text-sm font-semibold text-white">Open script</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Review blocks</p>
-                </Link>
-                <Link
-                  to={`/story/${story.id}/refinement`}
-                  className="rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3 transition hover:border-white/14 hover:bg-white/[0.05]"
-                >
-                  <p className="text-sm font-semibold text-white">Open lab</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Compare variants</p>
                 </Link>
               </div>
             </div>
@@ -171,20 +164,13 @@ export default function ReviewBar({
           )}
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-4">
           <Link
             to={`/story/${story.id}/split`}
             className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
           >
             <p className="text-sm font-semibold text-white">Open script</p>
             <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Primary blocks</p>
-          </Link>
-          <Link
-            to={`/story/${story.id}/refinement`}
-            className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-4 py-4 transition hover:border-white/14 hover:bg-white/[0.05]"
-          >
-            <p className="text-sm font-semibold text-white">Open refinement lab</p>
-            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Variants and scoring</p>
           </Link>
           <Link
             to={`/story/${story.id}/media`}

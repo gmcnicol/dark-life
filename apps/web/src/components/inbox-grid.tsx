@@ -2,14 +2,14 @@
 
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { useNavigate } from "react-router-dom";
 import { updateStoryStatus, type Story } from "@/lib/stories";
 import { STATUS_LABELS, nextWorkspaceRoute } from "@/lib/workflow";
-import { EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
+import { DataGridSurface, EmptyState, Panel, StatusBadge } from "./ui-surfaces";
 
 type InboxRow = Story & {
   storyLabel: string;
@@ -33,6 +33,8 @@ const DESTINATION_LABELS: Record<string, string> = {
   rejected: "Rejected",
   errored: "Review",
 };
+
+const REJECT_EXIT_MS = 280;
 
 const baseColumns: Array<ColDef<InboxRow>> = [
   {
@@ -103,32 +105,66 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
+  const [dismissingStoryIds, setDismissingStoryIds] = useState<number[]>([]);
+  const [hiddenStoryIds, setHiddenStoryIds] = useState<number[]>([]);
+  const rejectTimersRef = useRef<Map<number, number>>(new Map());
   const rejectStory = useMutation({
     mutationFn: (storyId: number) => updateStoryStatus(storyId, "rejected"),
+    onMutate: async (storyId) => {
+      const visibleStories = buildRows(stories, query).filter((story) => !hiddenStoryIds.includes(story.id));
+      const currentIndex = visibleStories.findIndex((story) => story.id === storyId);
+      const nextStoryId = currentIndex >= 0
+        ? (visibleStories[currentIndex + 1]?.id ?? visibleStories[currentIndex - 1]?.id ?? null)
+        : selectedStoryId;
+
+      if (selectedStoryId === storyId) {
+        setSelectedStoryId(nextStoryId);
+      }
+
+      setDismissingStoryIds((current) => (current.includes(storyId) ? current : [...current, storyId]));
+
+      const timeoutId = window.setTimeout(() => {
+        setHiddenStoryIds((current) => (current.includes(storyId) ? current : [...current, storyId]));
+        setDismissingStoryIds((current) => current.filter((id) => id !== storyId));
+        rejectTimersRef.current.delete(storyId);
+      }, REJECT_EXIT_MS);
+      rejectTimersRef.current.set(storyId, timeoutId);
+
+      return { storyId, previousSelectedStoryId: selectedStoryId };
+    },
+    onError: (_error, storyId, context) => {
+      const timeoutId = rejectTimersRef.current.get(storyId);
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+        rejectTimersRef.current.delete(storyId);
+      }
+      setDismissingStoryIds((current) => current.filter((id) => id !== storyId));
+      setHiddenStoryIds((current) => current.filter((id) => id !== storyId));
+      if (context?.previousSelectedStoryId != null) {
+        setSelectedStoryId(context.previousSelectedStoryId);
+      }
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["stories"] });
     },
   });
 
   const filteredStories = useMemo<InboxRow[]>(() => {
-    const needle = query.trim().toLowerCase();
-    return stories
-      .filter((story) => {
-        if (!needle) {
-          return true;
-        }
-        const haystack = `${story.title} ${story.author ?? ""} ${story.source_url ?? ""} ${story.id}`.toLowerCase();
-        return haystack.includes(needle);
-      })
-      .map((story) => ({
-        ...story,
-        storyLabel: story.title,
-        destinationLabel: DESTINATION_LABELS[story.status] ?? STATUS_LABELS[story.status],
-        sourceLabel: story.source_url ? safeHostname(story.source_url) : "Local source",
-        authorLabel: story.author?.trim() || "Unknown author",
-        redditCreatedLabel: formatRedditCreated(story.created_utc),
-      }));
-  }, [query, stories]);
+    return buildRows(stories, query).filter((story) => !hiddenStoryIds.includes(story.id));
+  }, [hiddenStoryIds, query, stories]);
+
+  useEffect(() => {
+    const liveStoryIds = new Set(stories.map((story) => story.id));
+    setHiddenStoryIds((current) => current.filter((id) => liveStoryIds.has(id)));
+    setDismissingStoryIds((current) => current.filter((id) => liveStoryIds.has(id)));
+  }, [stories]);
+
+  useEffect(() => {
+    return () => {
+      rejectTimersRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      rejectTimersRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (filteredStories.length === 0) {
@@ -195,9 +231,10 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
         sortable: false,
         resizable: false,
         suppressMovable: true,
+        cellClass: "inbox-grid__actions",
         cellRenderer: ({ data }: { data?: InboxRow }) =>
           data ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" data-inbox-grid-action="true">
               <button
                 type="button"
                 onClick={(event) => {
@@ -214,16 +251,16 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
                   event.stopPropagation();
                   rejectStory.mutate(data.id);
                 }}
-                disabled={data.status === "rejected" || rejectStory.isPending}
+                disabled={data.status === "rejected" || dismissingStoryIds.includes(data.id) || rejectStory.isPending}
                 className="rounded-full border border-rose-300/15 bg-rose-300/[0.08] px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:border-rose-300/30 hover:bg-rose-300/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Reject
+                {dismissingStoryIds.includes(data.id) ? "Removing…" : "Reject"}
               </button>
             </div>
           ) : null,
       },
     ];
-  }, [navigate, rejectStory]);
+  }, [dismissingStoryIds, navigate, rejectStory]);
 
   return (
     <Panel className="space-y-3 p-4">
@@ -270,26 +307,7 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
             </p>
           </div>
 
-          <div
-            className="ag-theme-quartz-dark inbox-grid-theme h-[68vh] min-h-[28rem] overflow-hidden rounded-[1.35rem] border border-white/10"
-            style={
-              {
-                width: "100%",
-                ["--ag-background-color" as string]: "rgba(10, 14, 22, 0.94)",
-                ["--ag-foreground-color" as string]: "rgb(241, 245, 249)",
-                ["--ag-header-background-color" as string]: "rgba(255, 255, 255, 0.03)",
-                ["--ag-header-foreground-color" as string]: "rgba(226, 232, 240, 0.74)",
-                ["--ag-row-hover-color" as string]: "rgba(56, 189, 248, 0.09)",
-                ["--ag-selected-row-background-color" as string]: "rgba(56, 189, 248, 0.16)",
-                ["--ag-border-color" as string]: "rgba(255, 255, 255, 0.08)",
-                ["--ag-row-border-color" as string]: "rgba(255, 255, 255, 0.06)",
-                ["--ag-odd-row-background-color" as string]: "rgba(255, 255, 255, 0.015)",
-                ["--ag-cell-horizontal-border" as string]: "transparent",
-                ["--ag-wrapper-border-radius" as string]: "1.35rem",
-                ["--ag-font-family" as string]: "inherit",
-              } as CSSProperties
-            }
-          >
+          <DataGridSurface className="inbox-grid-theme h-[68vh] min-h-[28rem]">
             <AgGridReact<InboxRow>
               theme={"legacy"}
               rowData={filteredStories}
@@ -305,6 +323,10 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
                 resizable: true,
               }}
               onRowClicked={(event: RowClickedEvent<InboxRow>) => {
+                const target = event.event?.target;
+                if (target instanceof Element && target.closest("[data-inbox-grid-action='true']")) {
+                  return;
+                }
                 if (event.data?.id) {
                   setSelectedStoryId(event.data.id);
                   navigate(nextWorkspaceRoute(event.data.status, event.data.id, Boolean(event.data.active_asset_bundle_id)));
@@ -312,10 +334,11 @@ export default function InboxGrid({ stories }: { stories: Story[] }) {
               }}
               rowClassRules={{
                 "ag-row-selected": (params) => params.data?.id === selectedStoryId,
+                "inbox-grid__row-dismissing": (params) => params.data?.id != null && dismissingStoryIds.includes(params.data.id),
               }}
               getRowId={({ data }) => `${data.id}`}
             />
-          </div>
+          </DataGridSurface>
         </div>
       )}
     </Panel>
@@ -360,4 +383,24 @@ function formatRedditCreated(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function buildRows(stories: Story[], query: string): InboxRow[] {
+  const needle = query.trim().toLowerCase();
+  return stories
+    .filter((story) => {
+      if (!needle) {
+        return true;
+      }
+      const haystack = `${story.title} ${story.author ?? ""} ${story.source_url ?? ""} ${story.id}`.toLowerCase();
+      return haystack.includes(needle);
+    })
+    .map((story) => ({
+      ...story,
+      storyLabel: story.title,
+      destinationLabel: DESTINATION_LABELS[story.status] ?? STATUS_LABELS[story.status],
+      sourceLabel: story.source_url ? safeHostname(story.source_url) : "Local source",
+      authorLabel: story.author?.trim() || "Unknown author",
+      redditCreatedLabel: formatRedditCreated(story.created_utc),
+    }));
 }

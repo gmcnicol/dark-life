@@ -1,5 +1,8 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 import { motion } from "motion/react";
+import { Link, type LinkProps } from "react-router-dom";
+import { BionicReadingToggle } from "@/components/bionic-text";
+import { READER_SIZE_PRESETS, type ReaderSizeId } from "@/lib/reader-preferences";
 import { cn } from "@/lib/utils";
 
 export function PageHeader({
@@ -61,6 +64,16 @@ export function Panel({
   );
 }
 
+export function SurfaceRail({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return <div className={cn("space-y-4 lg:sticky lg:top-4 lg:self-start", className)}>{children}</div>;
+}
+
 export function SectionHeading({
   eyebrow,
   title,
@@ -85,6 +98,54 @@ export function SectionHeading({
       </div>
       {action}
     </div>
+  );
+}
+
+export function PageActions({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("flex flex-col gap-3", className)}>{children}</div>;
+}
+
+export function PageStatusBar({
+  children,
+  className,
+  description,
+}: {
+  children: ReactNode;
+  className?: string;
+  description?: ReactNode;
+}) {
+  return (
+    <Panel className={cn("space-y-3 p-4", className)}>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+      {description ? <p className="text-sm text-[var(--text-soft)]">{description}</p> : null}
+    </Panel>
+  );
+}
+
+export function HintPanel({
+  eyebrow = "Operator guidance",
+  title,
+  description,
+  children,
+  className,
+}: {
+  eyebrow?: string;
+  title: string;
+  description: string;
+  children?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Panel className={cn("space-y-4 p-4", className)}>
+      <SectionHeading eyebrow={eyebrow} title={title} description={description} />
+      {children}
+    </Panel>
   );
 }
 
@@ -202,5 +263,134 @@ export function ActionButton({
     >
       {children}
     </button>
+  );
+}
+
+export function ActionLink({
+  className,
+  tone = "primary",
+  ...props
+}: LinkProps & {
+  tone?: "primary" | "secondary";
+}) {
+  return (
+    <Link
+      className={cn(
+        "inline-flex items-center justify-center rounded-full px-4 py-2.5 text-sm font-semibold transition duration-150 hover:-translate-y-0.5",
+        tone === "primary" &&
+          "bg-[linear-gradient(135deg,#8be9fd,#56d6ff)] text-slate-950 shadow-[0_12px_30px_rgba(86,214,255,0.25)]",
+        tone === "secondary" && "border border-white/12 bg-white/8 text-white hover:bg-white/12",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function ReaderControls({
+  size,
+  onSizeChange,
+  showBionicToggle = true,
+  className,
+  compact = false,
+}: {
+  size: ReaderSizeId;
+  onSizeChange: (size: ReaderSizeId) => void;
+  showBionicToggle?: boolean;
+  className?: string;
+  compact?: boolean;
+}) {
+  const activeIndex = Math.max(
+    READER_SIZE_PRESETS.findIndex((preset) => preset.id === size),
+    0,
+  );
+
+  const setIndex = (nextIndex: number) => {
+    const preset = READER_SIZE_PRESETS[nextIndex];
+    if (preset) {
+      onSizeChange(preset.id);
+    }
+  };
+
+  return (
+    <div className={cn(compact ? "space-y-3" : "space-y-4", className)}>
+      <div className={cn("gap-4", compact ? "grid md:grid-cols-[auto_minmax(0,1fr)] md:items-center" : "space-y-4")}>
+        {showBionicToggle ? <BionicReadingToggle /> : null}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+              Story text size
+            </p>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-white/78">
+              {READER_SIZE_PRESETS[activeIndex]?.label ?? "Comfortable"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 rounded-[1rem] border border-white/10 bg-white/[0.04] px-3 py-3">
+            <button
+              type="button"
+              onClick={() => setIndex(Math.max(0, activeIndex - 1))}
+              disabled={activeIndex === 0}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/12 bg-black/20 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Decrease font size"
+            >
+              A-
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={READER_SIZE_PRESETS.length - 1}
+              step={1}
+              value={activeIndex}
+              onChange={(event) => setIndex(Number(event.target.value))}
+              className="reader-slider min-w-0 flex-1 accent-cyan-300"
+              aria-label="Story text size"
+            />
+            <button
+              type="button"
+              onClick={() => setIndex(Math.min(READER_SIZE_PRESETS.length - 1, activeIndex + 1))}
+              disabled={activeIndex === READER_SIZE_PRESETS.length - 1}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-cyan-300/20 bg-cyan-300/[0.12] text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/[0.2] disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Increase font size"
+            >
+              A+
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[0.68rem] uppercase tracking-[0.16em] text-[var(--muted)]">
+            {READER_SIZE_PRESETS.map((preset) => (
+              <span key={preset.id}>{preset.label}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function readerStyleVars(fontSize: string, lineHeight: string): CSSProperties {
+  return {
+    "--reader-font-size": fontSize,
+    "--reader-line-height": lineHeight,
+  } as CSSProperties;
+}
+
+export function DataGridSurface({
+  className,
+  children,
+  variant = "default",
+  ...props
+}: HTMLAttributes<HTMLDivElement> & {
+  variant?: "default" | "dense";
+}) {
+  return (
+    <div
+      className={cn(
+        "ag-theme-quartz-dark data-grid-surface overflow-hidden rounded-[1.35rem] border border-white/10",
+        variant === "dense" && "data-grid-surface--dense",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </div>
   );
 }

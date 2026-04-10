@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import logging
 import mimetypes
 from pathlib import Path
 import re
@@ -70,6 +71,7 @@ from .pipeline import (
 from .script_refinement import enqueue_compat_script_generation, run_compat_script_generation
 
 router = APIRouter(tags=["stories"])
+logger = logging.getLogger(__name__)
 
 WORDS_PER_MINUTE = 160
 WORDS_PER_SECOND = WORDS_PER_MINUTE / 60
@@ -83,6 +85,7 @@ IMAGE_SEARCH_BASE_TERMS = (
     "liminal",
     "subtle",
 )
+PIXABAY_RESULT_LIMIT = 24
 IMAGE_SEARCH_THEME_CUES = (
     {
         "name": "isolation",
@@ -211,8 +214,44 @@ def _list_existing_story_images(session: Session, story_id: int) -> list[Asset]:
     ).all()
 
 
+def _pixabay_orientation(width: Any, height: Any) -> str | None:
+    try:
+        image_width = int(width or 0)
+        image_height = int(height or 0)
+    except (TypeError, ValueError):
+        return None
+    if image_width <= 0 or image_height <= 0:
+        return None
+    if image_height > image_width:
+        return "portrait"
+    if image_width > image_height:
+        return "landscape"
+    return "square"
+
+
+def _pixabay_hit_score(hit: dict[str, Any]) -> float:
+    width = int(hit.get("imageWidth") or 0)
+    height = int(hit.get("imageHeight") or 0)
+    area = max(width * height, 0)
+    likes = int(hit.get("likes") or 0)
+    comments = int(hit.get("comments") or 0)
+    downloads = int(hit.get("downloads") or 0)
+    views = int(hit.get("views") or 0)
+    orientation = _pixabay_orientation(width, height)
+    portrait_bonus = 250_000 if orientation == "portrait" else 100_000 if orientation == "square" else 0
+    return (
+        float(area)
+        + (likes * 50_000.0)
+        + (comments * 75_000.0)
+        + (downloads * 2_000.0)
+        + (views * 50.0)
+        + portrait_bonus
+    )
+
+
 def _fetch_pixabay_assets(keywords: str, *, page: int = 1) -> list[dict[str, Any]]:
     if not settings.PIXABAY_API_KEY:
+        logger.warning("pixabay_assets_skipped_missing_key", extra={"keywords": keywords, "page": page})
         return []
     try:
         response = requests.get(
@@ -221,20 +260,45 @@ def _fetch_pixabay_assets(keywords: str, *, page: int = 1) -> list[dict[str, Any
                 "key": settings.PIXABAY_API_KEY,
                 "q": keywords,
                 "image_type": "photo",
-                "orientation": "vertical",
-                "per_page": 12,
+                "per_page": PIXABAY_RESULT_LIMIT,
                 "page": max(page, 1),
                 "safesearch": "true",
             },
-            timeout=12,
+            headers={"User-Agent": "dark-life-api/1.0"},
+            timeout=(3.05, 8),
         )
         response.raise_for_status()
         payload = response.json()
-    except Exception:
+    except requests.RequestException as exc:
+        logger.warning(
+            "pixabay_assets_request_failed",
+            extra={
+                "keywords": keywords,
+                "page": page,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc)[:300],
+            },
+        )
+        return []
+    except ValueError as exc:
+        logger.warning(
+            "pixabay_assets_invalid_json",
+            extra={
+                "keywords": keywords,
+                "page": page,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc)[:300],
+            },
+        )
         return []
 
     assets: list[dict[str, Any]] = []
-    for hit in payload.get("hits", []):
+    sorted_hits = sorted(
+        [hit for hit in payload.get("hits", []) if isinstance(hit, dict)],
+        key=_pixabay_hit_score,
+        reverse=True,
+    )
+    for hit in sorted_hits[:12]:
         remote_url = hit.get("webformatURL") or hit.get("largeImageURL")
         if not remote_url:
             continue
@@ -251,7 +315,7 @@ def _fetch_pixabay_assets(keywords: str, *, page: int = 1) -> list[dict[str, Any
                 "provider": "pixabay",
                 "provider_id": str(hit.get("id")),
                 "type": "image",
-                "orientation": "portrait" if (hit.get("imageHeight", 0) or 0) >= (hit.get("imageWidth", 0) or 0) else "landscape",
+                "orientation": _pixabay_orientation(hit.get("imageWidth"), hit.get("imageHeight")),
                 "tags": [tag.strip() for tag in str(hit.get("tags", "")).split(",") if tag.strip()],
                 "width": hit.get("imageWidth"),
                 "height": hit.get("imageHeight"),

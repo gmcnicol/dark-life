@@ -4,6 +4,9 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleAdminProxy, isAdminProxyRequest } from "./server/admin-proxy.mjs";
+import { loadAppEnv } from "./server/load-env.mjs";
+
+loadAppEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");

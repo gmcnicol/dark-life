@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import InboxGrid from "@/components/inbox-grid";
 import { enqueueRedditIncremental, getPublishPlatformSettings, listReleaseQueue, listStories } from "@/lib/stories";
 import { buildQueueRunwaySummary } from "@/lib/publish-planning";
-import { ActionButton, LoadingState, PageHeader, StatusBadge } from "@/components/ui-surfaces";
+import { ActionButton, LoadingState, PageHeader, PageStatusBar, StatusBadge } from "@/components/ui-surfaces";
 
 const INBOX_FILTERS = [
   { value: "active", label: "Active" },
@@ -112,6 +112,22 @@ export default function InboxRoute() {
           </div>
         }
       />
+
+      <PageStatusBar>
+        <StatusBadge tone="accent">{stories.length} visible</StatusBadge>
+        <StatusBadge tone="warning">{runway.reviewableStoriesNow} ready now</StatusBadge>
+        <StatusBadge tone="neutral">{runway.queuedDays.toFixed(1)} days queued</StatusBadge>
+        {ingestMutation.isSuccess ? (
+          <StatusBadge tone="success">
+            {ingestMutation.data.total_inserted} ingested
+          </StatusBadge>
+        ) : null}
+        {ingestMutation.isError ? (
+          <StatusBadge tone="danger">
+            {ingestMutation.error instanceof Error ? ingestMutation.error.message : "Ingest failed"}
+          </StatusBadge>
+        ) : null}
+      </PageStatusBar>
 
       {(storiesQuery.isLoading || releasesQuery.isLoading || publishSettingsQuery.isLoading) ? (
         <LoadingState label="Loading story queue…" className="min-h-64" />

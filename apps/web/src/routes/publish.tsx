@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import PublishQueue from "@/components/publish-queue";
-import { ActionButton, LoadingState, PageHeader, Panel, StatusBadge } from "@/components/ui-surfaces";
+import { ActionButton, LoadingState, PageHeader, PageStatusBar, StatusBadge } from "@/components/ui-surfaces";
 import { getInsightsSummary, listReleaseQueue, rescheduleReleaseQueue } from "@/lib/stories";
 
 function platformLabel(platform: string): string {
@@ -141,30 +141,31 @@ export default function PublishRoute() {
           </div>
         }
       />
-      <Panel className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone="neutral">Updated {telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}</StatusBadge>
-          <StatusBadge tone="accent">{metrics.scheduledToday} scheduled today</StatusBadge>
-          <StatusBadge tone="warning">{metrics.awaitingReview} ready to approve</StatusBadge>
-          <StatusBadge tone="success">{metrics.winners} winners</StatusBadge>
-          <StatusBadge tone="danger">{metrics.flats} flat</StatusBadge>
-          <StatusBadge tone="warning">{metrics.manualHandoff} manual handoff</StatusBadge>
-          {rescheduleMutation.isSuccess ? (
-            <StatusBadge tone="success">
-              {rescheduleMutation.data.total_rescheduled} rescheduled
-            </StatusBadge>
-          ) : null}
-          {rescheduleMutation.isError ? (
-            <StatusBadge tone="danger">
-              {rescheduleMutation.error instanceof Error ? rescheduleMutation.error.message : "Reschedule failed"}
-            </StatusBadge>
-          ) : null}
-        </div>
-        <p className="text-sm text-[var(--text-soft)]">
-          Run the queue as a grid: scan by status first, then open one selected release at a time for edits and actions. Use
-          `Reschedule to cadence` to snap the current short queue onto the active daily slots.
-        </p>
-      </Panel>
+      <PageStatusBar
+        description={
+          <>
+            Run the queue as a grid: scan by status first, then open one selected release at a time for edits and
+            actions. Use `Reschedule to cadence` to snap the current short queue onto the active daily slots.
+          </>
+        }
+      >
+        <StatusBadge tone="neutral">Updated {telemetryTimestampLabel(releasesQuery.dataUpdatedAt)}</StatusBadge>
+        <StatusBadge tone="accent">{metrics.scheduledToday} scheduled today</StatusBadge>
+        <StatusBadge tone="warning">{metrics.awaitingReview} ready to approve</StatusBadge>
+        <StatusBadge tone="success">{metrics.winners} winners</StatusBadge>
+        <StatusBadge tone="danger">{metrics.flats} flat</StatusBadge>
+        <StatusBadge tone="warning">{metrics.manualHandoff} manual handoff</StatusBadge>
+        {rescheduleMutation.isSuccess ? (
+          <StatusBadge tone="success">
+            {rescheduleMutation.data.total_rescheduled} rescheduled
+          </StatusBadge>
+        ) : null}
+        {rescheduleMutation.isError ? (
+          <StatusBadge tone="danger">
+            {rescheduleMutation.error instanceof Error ? rescheduleMutation.error.message : "Reschedule failed"}
+          </StatusBadge>
+        ) : null}
+      </PageStatusBar>
       {releasesQuery.isLoading ? (
         <LoadingState label="Loading release queue…" className="min-h-56" />
       ) : (

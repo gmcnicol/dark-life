@@ -6,19 +6,17 @@ from pathlib import Path
 
 from shared.config import settings
 
+from ..ffmpeg import background_filter
 from .models import ArtifactSpec, CommandSpec, RenderInput, RenderPlan
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
-def _scale_filter(preset: dict) -> str:
+def _scale_filter(preset: dict, *, duration_sec: float) -> str:
     width = int(preset["width"])
     height = int(preset["height"])
-    return (
-        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},setsar=1"
-    )
+    return background_filter(width, height, duration_sec=duration_sec)
 
 
 def compile_short_render(render_input: RenderInput) -> RenderPlan:
@@ -29,7 +27,7 @@ def compile_short_render(render_input: RenderInput) -> RenderPlan:
     final_video_path = output_root / "video.mp4"
     final_subtitle_path = output_root / f"subtitles.{render_input.subtitle_format}"
     duration_sec = max(render_input.duration_ms / 1000.0, 1.0)
-    vf = _scale_filter(render_input.preset)
+    vf = _scale_filter(render_input.preset, duration_sec=duration_sec)
     fps = str(int(render_input.preset["fps"]))
     commands: list[CommandSpec] = []
 

@@ -2,13 +2,13 @@ import pytest
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import SQLModel, Session, create_engine, select
 
 from apps.api.db import get_session
 import apps.api.main as main
 import apps.api.stories as stories_api
 from apps.api.models import PublishJob, Release, Story
-from apps.api.pipeline import ensure_default_presets
+from apps.api.pipeline import ensure_default_presets, upsert_script
 from shared.workflow import PublishApprovalStatus, PublishDeliveryMode, ReleaseStatus, RenderVariant
 
 
@@ -29,6 +29,14 @@ def client_fixture(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(main, "engine", engine)
     main.app.dependency_overrides[get_session] = get_test_session
     monkeypatch.setenv("API_AUTH_TOKEN", "local-admin")
+    monkeypatch.setattr(
+        stories_api,
+        "_download_bundle_asset",
+        lambda story_id, asset: (
+            asset.get("local_path") or str(tmp_path / f"{asset.get('provider_id') or 'asset'}.jpg"),
+            asset.get("remote_url"),
+        ),
+    )
     with TestClient(main.app) as client:
         with Session(engine) as session:
             ensure_default_presets(session)
@@ -36,14 +44,27 @@ def client_fixture(tmp_path, monkeypatch: pytest.MonkeyPatch):
     main.app.dependency_overrides.clear()
 
 
+def generate_script_sync(client: TestClient, engine, story_id: int):
+    res = client.post(f"/stories/{story_id}/script")
+    assert res.status_code == 202
+    payload = res.json()
+    assert payload["batch_id"]
+
+    with Session(engine) as session:
+        story = session.get(Story, story_id)
+        assert story is not None
+        script = upsert_script(session, story)
+        session.commit()
+        session.refresh(script)
+        return script
+
+
 def test_generate_script_and_parts(client):
     client, engine = client
     story = client.post("/stories", json={"title": "My Story", "body_md": "I heard a noise. Then I opened the door. It was empty."}).json()
 
-    res = client.post(f"/stories/{story['id']}/script")
-    assert res.status_code == 200
-    script = res.json()
-    assert script["narration_text"]
+    script = generate_script_sync(client, engine, story["id"])
+    assert script.narration_text
 
     parts = client.get(f"/stories/{story['id']}/parts")
     assert parts.status_code == 200
@@ -107,6 +128,68 @@ def test_story_asset_index_uses_mood_first_pixabay_query(client, monkeypatch: py
     assert "knife" not in keywords
     assert "kitchen" not in keywords
     assert "silent" not in keywords
+
+
+def test_fetch_pixabay_assets_uses_broad_search_and_ranks_best_images(monkeypatch: pytest.MonkeyPatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "hits": [
+                    {
+                        "id": 11,
+                        "webformatURL": "https://example.com/weak-portrait.jpg",
+                        "imageWidth": 900,
+                        "imageHeight": 1600,
+                        "likes": 2,
+                        "comments": 0,
+                        "downloads": 20,
+                        "views": 200,
+                        "tags": "mist, portrait",
+                        "user": "weak",
+                    },
+                    {
+                        "id": 12,
+                        "webformatURL": "https://example.com/strong-landscape.jpg",
+                        "imageWidth": 2560,
+                        "imageHeight": 1440,
+                        "likes": 150,
+                        "comments": 18,
+                        "downloads": 5000,
+                        "views": 120000,
+                        "tags": "forest, fog",
+                        "user": "strong",
+                    },
+                ]
+            }
+
+    def fake_get(url: str, *, params: dict[str, object], timeout: tuple[float, int], headers: dict[str, str]):
+        captured["url"] = url
+        captured["params"] = params
+        captured["timeout"] = timeout
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(stories_api.settings, "PIXABAY_API_KEY", "pixa-key")
+    monkeypatch.setattr(stories_api.requests, "get", fake_get)
+
+    assets = stories_api._fetch_pixabay_assets("fog hallway", page=3)
+
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["q"] == "fog hallway"
+    assert params["page"] == 3
+    assert params["per_page"] == stories_api.PIXABAY_RESULT_LIMIT
+    assert "orientation" not in params
+    assert captured["timeout"] == (3.05, 8)
+    assert captured["headers"] == {"User-Agent": "dark-life-api/1.0"}
+    assert assets[0]["remote_url"] == "https://example.com/strong-landscape.jpg"
+    assert assets[0]["orientation"] == "landscape"
+    assert assets[1]["orientation"] == "portrait"
 
 
 def test_story_asset_index_moves_latest_fetch_results_to_top(client, monkeypatch: pytest.MonkeyPatch):
@@ -273,7 +356,7 @@ def test_create_bundle_and_release_jobs(client, tmp_path, monkeypatch: pytest.Mo
             "source_url": "https://reddit.com/r/nosleep/comments/example",
         },
     ).json()
-    client.post(f"/stories/{story['id']}/script")
+    generate_script_sync(client, engine, story["id"])
 
     assets = client.post(f"/stories/{story['id']}/assets/index").json()
     assert len(assets) >= 1
@@ -337,7 +420,7 @@ def test_clear_release_marks_it_done_and_updates_publish_job(client, monkeypatch
             "body_md": "One. Two. Three.",
         },
     ).json()
-    client.post(f"/stories/{story['id']}/script")
+    generate_script_sync(client, engine, story["id"])
     assets = client.post(f"/stories/{story['id']}/assets/index").json()
     bundle = client.post(
         f"/stories/{story['id']}/asset-bundles",
@@ -398,12 +481,10 @@ def test_create_releases_uses_active_script_parts_only(client, monkeypatch: pyte
         },
     ).json()
 
-    first_script = client.post(f"/stories/{story['id']}/script")
-    assert first_script.status_code == 200
+    first_script = generate_script_sync(client, _engine, story["id"])
 
-    second_script = client.post(f"/stories/{story['id']}/script")
-    assert second_script.status_code == 200
-    assert second_script.json()["id"] != first_script.json()["id"]
+    second_script = generate_script_sync(client, _engine, story["id"])
+    assert second_script.id != first_script.id
 
     parts = client.get(f"/stories/{story['id']}/parts")
     assert parts.status_code == 200
@@ -434,7 +515,7 @@ def test_create_releases_uses_active_script_parts_only(client, monkeypatch: pyte
 def test_create_weekly_compilation(client):
     client, _engine = client
     story = client.post("/stories", json={"title": "Weekly", "body_md": "I ran. I hid. I survived."}).json()
-    client.post(f"/stories/{story['id']}/script")
+    generate_script_sync(client, _engine, story["id"])
     res = client.post(
         f"/stories/{story['id']}/compilations",
         json={"preset_slug": "weekly-full", "platforms": ["youtube"]},
@@ -454,7 +535,7 @@ def test_create_weekly_compilation(client):
 def test_weekly_compilation_rejects_non_youtube_platform(client):
     client, _engine = client
     story = client.post("/stories", json={"title": "Weekly", "body_md": "I ran. I hid. I survived."}).json()
-    client.post(f"/stories/{story['id']}/script")
+    generate_script_sync(client, _engine, story["id"])
     res = client.post(
         f"/stories/{story['id']}/compilations",
         json={"preset_slug": "weekly-full", "platforms": ["instagram"]},
@@ -466,7 +547,7 @@ def test_short_release_rejects_inactive_platform(client, monkeypatch: pytest.Mon
     client, _engine = client
     monkeypatch.setattr(stories_api.settings, "ACTIVE_PUBLISH_PLATFORMS", "youtube")
     story = client.post("/stories", json={"title": "Inactive Platform", "body_md": "One. Two. Three."}).json()
-    client.post(f"/stories/{story['id']}/script")
+    generate_script_sync(client, _engine, story["id"])
     monkeypatch.setattr(
         stories_api,
         "_fetch_pixabay_assets",
@@ -544,7 +625,7 @@ def test_short_release_schedule_follows_existing_queue(client, monkeypatch: pyte
         "/stories",
         json={"title": "Cadence", "body_md": "One. Two. Three. Four."},
     ).json()
-    client.post(f"/stories/{story['id']}/script")
+    generate_script_sync(client, engine, story["id"])
     client.put(
         f"/stories/{story['id']}/parts",
         json=[
@@ -567,7 +648,7 @@ def test_short_release_schedule_follows_existing_queue(client, monkeypatch: pyte
     )
     assert releases.status_code == 200
     publish_times = [item["publish_at"] for item in releases.json()]
-    assert publish_times == ["2030-01-04T12:00:00", "2030-01-05T12:00:00"]
+    assert publish_times == ["2030-01-03T13:00:00", "2030-01-03T18:00:00"]
 
 
 def test_bundle_rejects_incomplete_part_asset_map(client, monkeypatch: pytest.MonkeyPatch):
@@ -593,7 +674,7 @@ def test_bundle_rejects_incomplete_part_asset_map(client, monkeypatch: pytest.Mo
         "/stories",
         json={"title": "Mapping", "body_md": "One. Two. Three."},
     ).json()
-    client.post(f"/stories/{story['id']}/script")
+    generate_script_sync(client, _engine, story["id"])
     parts = client.put(
         f"/stories/{story['id']}/parts",
         json=[

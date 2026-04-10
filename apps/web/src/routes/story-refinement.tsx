@@ -1,10 +1,11 @@
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
-import { type CSSProperties, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { useParams } from "react-router-dom";
+import { useReaderPreferences } from "@/lib/reader-preferences";
 import {
   activateScriptVersion,
   createScriptBatch,
@@ -17,12 +18,18 @@ import {
 } from "@/lib/stories";
 import {
   ActionButton,
+  DataGridSurface,
   EmptyState,
+  HintPanel,
   LoadingState,
   MetricCard,
+  PageStatusBar,
   Panel,
+  ReaderControls,
   SectionHeading,
   StatusBadge,
+  SurfaceRail,
+  readerStyleVars,
 } from "@/components/ui-surfaces";
 import { BionicText } from "@/components/bionic-text";
 
@@ -81,6 +88,7 @@ export default function StoryRefinementRoute() {
   const storyId = Number(params.id);
   const queryClient = useQueryClient();
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+  const { size, setSize, preset } = useReaderPreferences();
   const overviewQuery = useQuery({
     queryKey: ["story-overview", storyId],
     queryFn: () => getStoryOverview(storyId),
@@ -172,7 +180,7 @@ export default function StoryRefinementRoute() {
   const selectedCandidate =
     candidateRows.find((candidate) => candidate.id === selectedCandidateId) ?? candidateRows[0] ?? null;
   if (overviewQuery.isLoading || batchesQuery.isLoading || publishPlatformsQuery.isLoading) {
-    return <LoadingState label="Loading refinement lab…" className="min-h-56" />;
+    return <LoadingState label="Loading alternatives…" className="min-h-56" />;
   }
 
   return (
@@ -188,7 +196,7 @@ export default function StoryRefinementRoute() {
         <Panel className="space-y-4">
           <SectionHeading
             eyebrow="Experiment control"
-            title="Refinement lab"
+            title="Alternatives"
             description="Compare ranked variants in order, inspect one candidate at a time, and keep the main decision surface focused on the selected script."
             action={
               <ActionButton onClick={() => launchBatch.mutate()} disabled={launchBatch.isPending}>
@@ -211,12 +219,11 @@ export default function StoryRefinementRoute() {
           )}
         </Panel>
 
-        <Panel className="space-y-4 p-4">
-          <SectionHeading
-            eyebrow="Selection mode"
-            title="Operator guidance"
-            description="The table is for ranking and comparison. The detail pane below is where activation and queueing happen."
-          />
+        <HintPanel
+          eyebrow="Selection mode"
+          title="Operator guidance"
+          description="The table is for ranking and comparison. The detail pane below is where activation and queueing happen."
+        >
           <div className="space-y-2 text-sm leading-6 text-[var(--text-soft)]">
             <p>1. Scan rank, state, score, and hook without losing your place.</p>
             <p>2. Select one row to inspect the full parts stack.</p>
@@ -230,7 +237,7 @@ export default function StoryRefinementRoute() {
               <p className="mt-2 text-sm leading-6 text-white/90">{batchDetail.report.summary}</p>
             </div>
           ) : null}
-        </Panel>
+        </HintPanel>
       </section>
 
       {batchDetail ? (
@@ -242,23 +249,7 @@ export default function StoryRefinementRoute() {
                 title="Candidate queue"
                 description="Rows are ordered by critic rank ascending. `#1` is the intended top candidate and stays at the top by default."
               />
-              <div
-                className="ag-theme-quartz-dark overflow-hidden rounded-[1.35rem] border border-white/10"
-                style={
-                  {
-                    width: "100%",
-                    ["--ag-background-color" as string]: "rgba(6, 10, 16, 0.88)",
-                    ["--ag-foreground-color" as string]: "rgb(241, 245, 249)",
-                    ["--ag-header-background-color" as string]: "rgba(255, 255, 255, 0.04)",
-                    ["--ag-header-foreground-color" as string]: "rgba(226, 232, 240, 0.84)",
-                    ["--ag-row-hover-color" as string]: "rgba(56, 189, 248, 0.08)",
-                    ["--ag-selected-row-background-color" as string]: "rgba(56, 189, 248, 0.14)",
-                    ["--ag-border-color" as string]: "rgba(255, 255, 255, 0.08)",
-                    ["--ag-odd-row-background-color" as string]: "rgba(255, 255, 255, 0.02)",
-                    ["--ag-font-family" as string]: "inherit",
-                  } as CSSProperties
-                }
-              >
+              <DataGridSurface variant="dense">
                 <AgGridReact<CandidateRow>
                   theme={"legacy"}
                   rowData={candidateRows}
@@ -281,18 +272,87 @@ export default function StoryRefinementRoute() {
                   }}
                   getRowId={({ data }) => `${data.id}`}
                 />
-              </div>
+              </DataGridSurface>
             </Panel>
           ) : null}
 
           {selectedCandidate ? (
-            <Panel className="space-y-5">
-              <SectionHeading
-                eyebrow={selectedCandidate.orderLabel}
-                title={selectedCandidate.hook}
-                description={`State: ${selectedCandidate.stateLabel}${selectedCandidate.scoreLabel !== "n/a" ? ` · Performance ${selectedCandidate.scoreLabel}` : ""}`}
-                action={
-                  <div className="flex flex-wrap gap-2">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className="space-y-4">
+                <Panel className="space-y-5">
+                  <SectionHeading
+                    eyebrow={selectedCandidate.orderLabel}
+                    title={selectedCandidate.hook}
+                    description={`State: ${selectedCandidate.stateLabel}${selectedCandidate.scoreLabel !== "n/a" ? ` · Performance ${selectedCandidate.scoreLabel}` : ""}`}
+                  />
+                  <div className="rounded-[1.2rem] border border-white/8 bg-black/15 p-4">
+                    <ReaderControls size={size} onSizeChange={setSize} compact />
+                  </div>
+                </Panel>
+
+                <PageStatusBar>
+                  <StatusBadge tone={candidateStateTone(selectedCandidate)}>
+                    {selectedCandidate.stateLabel}
+                  </StatusBadge>
+                  {selectedCandidate.is_active ? <StatusBadge tone="accent">Current live draft</StatusBadge> : null}
+                  <StatusBadge tone="neutral">{selectedCandidate.partsCount} parts</StatusBadge>
+                </PageStatusBar>
+
+                <Panel className="space-y-3">
+                  {selectedCandidate.parts
+                    .slice()
+                    .sort((left, right) => left.index - right.index)
+                    .map((part) => (
+                      <div
+                        key={part.id}
+                        className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] p-4"
+                      >
+                        <div className="flex items-center gap-3 border-b border-white/8 pb-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-cyan-300/20 bg-cyan-300/[0.1] text-sm font-semibold text-cyan-100">
+                            {part.index}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+                              {part.episode_type || "episode"}
+                            </p>
+                            <p className="mt-1 text-sm font-semibold leading-6 text-white">
+                              {part.hook || "No hook"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                            Script block
+                          </p>
+                          <div style={readerStyleVars(preset.fontSize, preset.lineHeight)}>
+                            <BionicText
+                              text={part.body_md}
+                              className="reader-copy max-w-none text-[var(--text-soft)]"
+                            />
+                          </div>
+
+                          {part.loop_line ? (
+                            <div className="rounded-[0.9rem] border border-cyan-300/12 bg-cyan-300/[0.06] px-3 py-2">
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/80">
+                                Loop line
+                              </p>
+                              <p className="mt-1 text-sm leading-6 text-cyan-50">{part.loop_line}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                </Panel>
+              </div>
+
+              <SurfaceRail className="xl:sticky xl:top-4 xl:self-start">
+                <HintPanel
+                  eyebrow="Candidate actions"
+                  title="Promote or queue"
+                  description="The selected candidate is the only place where activation or release queueing should happen."
+                >
+                  <div className="flex flex-col gap-3">
                     <ActionButton
                       tone="secondary"
                       onClick={() => activateCandidate.mutate(selectedCandidate.id)}
@@ -307,62 +367,9 @@ export default function StoryRefinementRoute() {
                       Queue releases
                     </ActionButton>
                   </div>
-                }
-              />
-
-              <div className="flex flex-wrap items-center gap-3">
-                <StatusBadge tone={candidateStateTone(selectedCandidate)}>
-                  {selectedCandidate.stateLabel}
-                </StatusBadge>
-                {selectedCandidate.is_active ? <StatusBadge tone="accent">Current live draft</StatusBadge> : null}
-                <StatusBadge tone="neutral">{selectedCandidate.partsCount} parts</StatusBadge>
-              </div>
-
-              <div className="space-y-3">
-                {selectedCandidate.parts
-                  .slice()
-                  .sort((left, right) => left.index - right.index)
-                  .map((part) => (
-                    <div
-                      key={part.id}
-                      className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] p-4"
-                    >
-                      <div className="flex items-center gap-3 border-b border-white/8 pb-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-cyan-300/20 bg-cyan-300/[0.1] text-sm font-semibold text-cyan-100">
-                          {part.index}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
-                            {part.episode_type || "episode"}
-                          </p>
-                          <p className="mt-1 text-sm font-semibold leading-6 text-white">
-                            {part.hook || "No hook"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 space-y-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                          Script block
-                        </p>
-                        <BionicText
-                          text={part.body_md}
-                          className="max-w-none text-[1.08rem] leading-9 text-[var(--text-soft)]"
-                        />
-
-                        {part.loop_line ? (
-                          <div className="rounded-[0.9rem] border border-cyan-300/12 bg-cyan-300/[0.06] px-3 py-2">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/80">
-                              Loop line
-                            </p>
-                            <p className="mt-1 text-sm leading-6 text-cyan-50">{part.loop_line}</p>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </Panel>
+                </HintPanel>
+              </SurfaceRail>
+            </div>
           ) : null}
         </section>
       ) : null}

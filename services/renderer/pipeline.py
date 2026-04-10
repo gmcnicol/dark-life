@@ -147,8 +147,11 @@ def render_compilation_job(context: dict[str, Any]) -> dict[str, object]:
     job = context["job"]
     story = context["story"]
     compilation = context["compilation"]
+    preset = context["render_preset"]
     if not compilation:
         raise FileNotFoundError("Compilation not found")
+    if not preset:
+        raise FileNotFoundError("Render preset not found")
     part_index_by_id = {
         part["id"]: part["index"]
         for part in context.get("parts", [])
@@ -166,7 +169,14 @@ def render_compilation_job(context: dict[str, Any]) -> dict[str, object]:
     artifact_rows.sort(key=lambda artifact: part_index_by_id[artifact["story_part_id"]])
     if len(artifact_rows) != len(part_index_by_id):
         raise FileNotFoundError("Weekly compilation requires all short parts to be rendered")
-    artifacts = [Path(artifact["video_path"]) for artifact in artifact_rows]
+    job_dir = Path(settings.TMP_DIR) / str(job["id"])
+    job_dir.mkdir(parents=True, exist_ok=True)
+    artifacts: list[Path] = []
+    for index, artifact in enumerate(artifact_rows, start=1):
+        source_path = Path(artifact["video_path"])
+        staged_path = job_dir / f"segment-{index:03d}.mp4"
+        ffmpeg.reframe_video_to_landscape(source_path, staged_path, preset=preset)
+        artifacts.append(staged_path)
     output_root = Path(settings.OUTPUT_DIR) / "stories" / str(story["id"]) / "jobs" / str(job["id"])
     output_root.mkdir(parents=True, exist_ok=True)
     video_path = output_root / "video.mp4"
@@ -176,8 +186,9 @@ def render_compilation_job(context: dict[str, Any]) -> dict[str, object]:
         "bytes": video_path.stat().st_size,
         "duration_ms": ffmpeg.probe_duration_ms(video_path),
         "metadata": {
-            "compiler": "renderer.compilation.v1",
+            "compiler": "renderer.compilation.v2",
             "part_count": len(artifacts),
+            "preset_slug": preset["slug"],
             "selected_asset_id": None,
             "selected_music_track": None,
             "tts_cache_hit": False,
