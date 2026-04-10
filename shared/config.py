@@ -265,15 +265,15 @@ class Settings(BaseSettings):
         description="OpenAI API key for Whisper API",
     )
     OPENAI_SCRIPT_MODEL: str = Field(
-        default="gpt-4.1-mini",
+        default="gpt-5",
         description="OpenAI model used for script adaptation",
     )
     OPENAI_CRITIC_MODEL: str = Field(
-        default="gpt-4.1-mini",
+        default="gpt-5",
         description="OpenAI model used for script critique",
     )
     OPENAI_ANALYST_MODEL: str = Field(
-        default="gpt-4.1-mini",
+        default="gpt-5",
         description="OpenAI model used for experiment analysis",
     )
     REFINEMENT_POLL_INTERVAL_SEC: int = Field(
@@ -295,6 +295,18 @@ class Settings(BaseSettings):
     REFINEMENT_DEFAULT_SHORTLIST_SIZE: int = Field(
         default=3,
         description="Default number of shortlisted scripts per batch",
+    )
+    REFINEMENT_OPENAI_MAX_ATTEMPTS: int = Field(
+        default=5,
+        description="Maximum total OpenAI attempts per refinement operation",
+    )
+    REFINEMENT_OPENAI_BACKOFF_BASE_SEC: float = Field(
+        default=2.0,
+        description="Initial exponential backoff delay for refinement OpenAI retries in seconds",
+    )
+    REFINEMENT_OPENAI_BACKOFF_MAX_SEC: float = Field(
+        default=60.0,
+        description="Maximum exponential backoff delay for refinement OpenAI retries in seconds",
     )
     PEXELS_API_KEY: str = Field(
         default="",

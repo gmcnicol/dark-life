@@ -218,3 +218,126 @@ def test_prompt_version_activation_archives_previous_active(client):
     statuses = {prompt["version_label"]: prompt["status"] for prompt in prompts.json()}
     assert statuses["gen_prompt_v_next"] == "active"
     assert "archived" in statuses.values()
+
+
+def test_generate_job_status_persists_retry_and_fallback_metadata(client):
+    client, _engine = client
+    story = client.post("/stories", json={"title": "Refine me", "body_md": "One. Two. Three. Four. Five."}).json()
+
+    created = client.post(
+        f"/stories/{story['id']}/script-batches",
+        json={"candidate_count": 2, "shortlisted_count": 1},
+    )
+    batch_id = created.json()["batch"]["id"]
+
+    jobs = client.get("/refinement-jobs", params={"status": "queued"}, headers=_worker_headers()).json()
+    extract_job = next(job for job in jobs if job["payload"]["batch_id"] == batch_id)
+    client.post(
+        f"/refinement-jobs/{extract_job['id']}/claim",
+        json={"lease_seconds": 180},
+        headers=_worker_headers(),
+    )
+    client.post(
+        f"/refinement-jobs/{extract_job['id']}/status",
+        json={"status": "rendering"},
+        headers=_worker_headers(),
+    )
+    client.post(
+        f"/refinement-jobs/{extract_job['id']}/status",
+        json={
+            "status": "rendered",
+            "metadata": {
+                "concept": {
+                    "concept_key": "mirror-thing",
+                    "concept_label": "Mirror Thing",
+                    "anomaly_type": "entity",
+                    "object_focus": "mirror",
+                    "specificity": "concrete",
+                }
+            },
+        },
+        headers=_worker_headers(),
+    )
+
+    jobs = client.get("/refinement-jobs", params={"status": "queued"}, headers=_worker_headers()).json()
+    generate_job = next(job for job in jobs if job["kind"] == "refine_generate_batch" and job["payload"]["batch_id"] == batch_id)
+    client.post(
+        f"/refinement-jobs/{generate_job['id']}/claim",
+        json={"lease_seconds": 180},
+        headers=_worker_headers(),
+    )
+    client.post(
+        f"/refinement-jobs/{generate_job['id']}/status",
+        json={"status": "rendering"},
+        headers=_worker_headers(),
+    )
+    generate_done = client.post(
+        f"/refinement-jobs/{generate_job['id']}/status",
+        json={
+            "status": "rendered",
+            "metadata": {
+                "candidates": [_candidate("A"), _candidate("B")],
+                "attempt_count": 5,
+                "last_error_class": "ReadTimeout",
+                "last_error_message": "timed out",
+                "fallback_used": True,
+                "fallback_reason": "openai_empty_response",
+            },
+        },
+        headers=_worker_headers(),
+    )
+    assert generate_done.status_code == 200
+    assert generate_done.json()["retries"] == 4
+    assert generate_done.json()["result"]["fallback_used"] is True
+
+    detail = client.get(f"/script-batches/{batch_id}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["batch"]["result"]["fallback_used"] is True
+    assert payload["batch"]["result"]["fallback_reason"] == "openai_empty_response"
+
+
+def test_retryable_refinement_error_updates_job_retries(client):
+    client, _engine = client
+    story = client.post("/stories", json={"title": "Retry me", "body_md": "One. Two. Three. Four. Five."}).json()
+    created = client.post(
+        f"/stories/{story['id']}/script-batches",
+        json={"candidate_count": 2, "shortlisted_count": 1},
+    )
+    batch_id = created.json()["batch"]["id"]
+    jobs = client.get("/refinement-jobs", params={"status": "queued"}, headers=_worker_headers()).json()
+    extract_job = next(job for job in jobs if job["payload"]["batch_id"] == batch_id)
+
+    client.post(
+        f"/refinement-jobs/{extract_job['id']}/claim",
+        json={"lease_seconds": 180},
+        headers=_worker_headers(),
+    )
+    client.post(
+        f"/refinement-jobs/{extract_job['id']}/status",
+        json={"status": "rendering"},
+        headers=_worker_headers(),
+    )
+    errored = client.post(
+        f"/refinement-jobs/{extract_job['id']}/status",
+        json={
+            "status": "errored",
+            "retryable": True,
+            "error_class": "ReadTimeout",
+            "error_message": "timed out",
+            "metadata": {
+                "attempt_count": 5,
+                "last_error_class": "ReadTimeout",
+                "last_error_message": "timed out",
+            },
+        },
+        headers=_worker_headers(),
+    )
+    assert errored.status_code == 200
+    assert errored.json()["retries"] == 4
+    assert errored.json()["result"]["attempt_count"] == 5
+
+    detail = client.get(f"/script-batches/{batch_id}")
+    assert detail.status_code == 200
+    assert detail.json()["batch"]["status"] == "errored"
+    assert detail.json()["batch"]["result"]["last_error_class"] == "ReadTimeout"

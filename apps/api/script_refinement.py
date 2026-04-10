@@ -98,6 +98,7 @@ class RefinementJobStatusUpdate(BaseModel):
     error_message: str | None = None
     stderr_snippet: str | None = None
     metadata: dict[str, Any] | None = None
+    retryable: bool = False
 
 
 def require_worker_token(authorization: str | None = Header(default=None)) -> None:
@@ -155,6 +156,16 @@ def _serialize_batch_detail(session: Session, batch: ScriptBatch) -> dict[str, A
 def _existing_refinement_jobs(session: Session, batch_id: int, kind: str) -> list[Job]:
     jobs = session.exec(select(Job).where(Job.kind == kind)).all()
     return [job for job in jobs if (job.payload or {}).get("batch_id") == batch_id]
+
+
+def _apply_retry_metadata(job: Job, metadata: dict[str, Any] | None, *, retryable: bool) -> None:
+    if not metadata:
+        return
+    attempt_count = int(metadata.get("attempt_count") or 0)
+    if retryable:
+        job.retries += max(attempt_count - 1, 1)
+    elif attempt_count > 1:
+        job.retries = max(job.retries, attempt_count - 1)
 
 
 def _enqueue_refinement_job(
@@ -685,18 +696,23 @@ def update_refinement_job_status(
     job.stderr_snippet = update.stderr_snippet
     if update.metadata:
         job.result = {**(job.result or {}), **update.metadata}
+    _apply_retry_metadata(job, update.metadata, retryable=update.retryable)
 
     if update.status == JobStatus.RENDERING.value:
         batch.status = "processing"
     elif update.status == JobStatus.ERRORED.value:
         batch.status = "errored"
         batch.error_message = update.error_message
+        if update.metadata:
+            batch.result = {**(batch.result or {}), **update.metadata}
     elif update.status == JobStatus.RENDERED.value:
         if job.kind == EXTRACT_JOB:
             concept_payload = (update.metadata or {}).get("concept") or extract_concept_payload(story, session=session)
             concept = upsert_story_concept(session, story, concept_payload)
             batch.concept_id = concept.id
             batch.status = "concept_ready"
+            if update.metadata:
+                batch.result = {**(batch.result or {}), **update.metadata}
             _enqueue_refinement_job(session, batch=batch, kind=GENERATE_JOB)
         elif job.kind == GENERATE_JOB:
             concept = session.get(StoryConcept, batch.concept_id) if batch.concept_id else None
@@ -712,7 +728,11 @@ def update_refinement_job_status(
                 session.delete(script)
             persist_candidates(session, story=story, batch=batch, concept=concept, candidates=candidates[: batch.candidate_count])
             batch.status = "generated"
-            batch.result = {"candidate_count": min(len(candidates), batch.candidate_count)}
+            batch.result = {
+                **(batch.result or {}),
+                **(update.metadata or {}),
+                "candidate_count": min(len(candidates), batch.candidate_count),
+            }
             _enqueue_refinement_job(session, batch=batch, kind=CRITIC_JOB)
         elif job.kind == CRITIC_JOB:
             ranked = score_script_versions(session, _batch_scripts(session, batch.id or 0), batch.shortlisted_count)
@@ -730,17 +750,20 @@ def update_refinement_job_status(
             batch.status = "ready_for_review"
             batch.result = {
                 **(batch.result or {}),
+                **(update.metadata or {}),
                 "shortlist_ids": [script.id for script in ranked[: batch.shortlisted_count]],
             }
         elif job.kind == METRICS_JOB:
             window_hours = int((job.payload or {}).get("window_hours") or 24)
             _apply_metrics_for_window(session, batch, window_hours)
+            if update.metadata:
+                batch.result = {**(batch.result or {}), **update.metadata}
             if window_hours >= 72:
                 _ensure_analysis_job(session, batch)
         elif job.kind == ANALYZE_JOB:
             report = build_analysis(session, batch, metrics_window_hours=72)
             batch.status = "analysis_ready"
-            batch.result = {**(batch.result or {}), "analysis_report_id": report.id}
+            batch.result = {**(batch.result or {}), **(update.metadata or {}), "analysis_report_id": report.id}
 
     session.add(batch)
     session.add(job)

@@ -11,7 +11,7 @@ from pathlib import Path
 import requests
 
 from apps.api.models import Story, StoryConcept
-from apps.api.refinement import extract_concept_payload, generate_candidate_payloads
+from apps.api.refinement import OpenAIRefinementError, extract_concept_payload, generate_candidate_payloads
 from shared.config import settings
 from shared.logging import log_error, log_info
 from shared.workflow import JobStatus
@@ -78,16 +78,18 @@ def run_refinement_job(job: dict, session: requests.sessions.Session | None = No
     story = _story_from_context(context)
     kind = job["kind"]
     if kind == "refine_extract_concept":
-        return {"metadata": {"concept": extract_concept_payload(story)}}
+        concept, retry_metadata = extract_concept_payload(story, include_retry_metadata=True)
+        return {"metadata": {"concept": concept, **retry_metadata}}
     if kind == "refine_generate_batch":
         batch = context["batch"]
         concept = _concept_from_context(context)
-        candidates = generate_candidate_payloads(
+        candidates, retry_metadata = generate_candidate_payloads(
             story,
             concept=concept,
             candidate_count=int(batch.get("candidate_count") or settings.REFINEMENT_DEFAULT_BATCH_SIZE),
+            include_retry_metadata=True,
         )
-        return {"metadata": {"candidates": candidates}}
+        return {"metadata": {"candidates": candidates, **retry_metadata}}
     return {"metadata": {}}
 
 
@@ -143,13 +145,23 @@ def process_job(job: dict, session: requests.sessions.Session | None = None) -> 
         if error_holder:
             exc = error_holder[0]
             log_error("error", cid=cid, job_id=job_id, error=str(exc))
+            payload = {
+                "status": JobStatus.ERRORED.value,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            }
+            if isinstance(exc, OpenAIRefinementError):
+                payload["retryable"] = exc.retryable
+                payload["metadata"] = {
+                    "attempt_count": exc.attempt_count,
+                    "last_error_class": exc.last_error_class or exc.__class__.__name__,
+                    "last_error_message": exc.last_error_message or str(exc),
+                }
+                if exc.response_summary:
+                    payload["stderr_snippet"] = exc.response_summary
             client.set_status(
                 job_id,
-                {
-                    "status": JobStatus.ERRORED.value,
-                    "error_class": exc.__class__.__name__,
-                    "error_message": str(exc),
-                },
+                payload,
             )
             return
 

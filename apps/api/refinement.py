@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import re
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from statistics import mean
@@ -14,7 +16,7 @@ import requests
 from sqlmodel import Session, select
 
 from shared.config import settings
-from shared.logging import log_error
+from shared.logging import log_error, log_info
 
 from .models import (
     AnalysisReport,
@@ -87,6 +89,166 @@ PROMPT_DEFAULTS: dict[str, dict[str, Any]] = {
         "config": {"weights": {"retention": 0.55, "engagement": 0.25, "completion": 0.2}},
     },
 }
+
+
+class OpenAIRefinementError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        status_code: int | None = None,
+        response_summary: str | None = None,
+        attempt_count: int = 1,
+        last_error_class: str | None = None,
+        last_error_message: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
+        self.response_summary = response_summary
+        self.attempt_count = attempt_count
+        self.last_error_class = last_error_class
+        self.last_error_message = last_error_message
+
+
+def _response_summary(payload: dict[str, Any]) -> str:
+    parts: list[str] = []
+    response_id = payload.get("id")
+    status = payload.get("status")
+    if response_id:
+        parts.append(f"id={response_id}")
+    if status:
+        parts.append(f"status={status}")
+    error = payload.get("error")
+    if isinstance(error, dict):
+        err_type = error.get("type")
+        err_msg = error.get("message")
+        if err_type:
+            parts.append(f"error_type={err_type}")
+        if err_msg:
+            parts.append(f"error={_clip(str(err_msg), 80)}")
+    output_text = _responses_output_text(payload)
+    if output_text:
+        parts.append(f"output={_clip(output_text, 80)}")
+    return "; ".join(parts) or "no_summary"
+
+
+def _classify_openai_request_error(
+    exc: Exception,
+    *,
+    stage: str,
+    story_id: int | None,
+) -> OpenAIRefinementError:
+    if isinstance(exc, OpenAIRefinementError):
+        return exc
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError)):
+        return OpenAIRefinementError(
+            f"OpenAI {stage} failed for story {story_id}: {exc}",
+            retryable=True,
+            last_error_class=exc.__class__.__name__,
+            last_error_message=str(exc),
+        )
+    if isinstance(exc, requests.HTTPError):
+        response = exc.response
+        status_code = response.status_code if response is not None else None
+        response_summary = None
+        if response is not None:
+            try:
+                response_summary = _response_summary(response.json())
+            except Exception:
+                response_summary = _clip(getattr(response, "text", "") or "", 120)
+        retryable = bool(status_code == 429 or (status_code is not None and status_code >= 500))
+        return OpenAIRefinementError(
+            f"OpenAI {stage} failed for story {story_id}: HTTP {status_code or 'error'}",
+            retryable=retryable,
+            status_code=status_code,
+            response_summary=response_summary,
+            last_error_class=exc.__class__.__name__,
+            last_error_message=str(exc),
+        )
+    if isinstance(exc, requests.RequestException):
+        return OpenAIRefinementError(
+            f"OpenAI {stage} failed for story {story_id}: {exc}",
+            retryable=False,
+            last_error_class=exc.__class__.__name__,
+            last_error_message=str(exc),
+        )
+    if isinstance(exc, json.JSONDecodeError):
+        return OpenAIRefinementError(
+            f"OpenAI {stage} returned invalid JSON for story {story_id}",
+            retryable=False,
+            last_error_class=exc.__class__.__name__,
+            last_error_message=str(exc),
+        )
+    return OpenAIRefinementError(
+        f"OpenAI {stage} failed for story {story_id}: {exc}",
+        retryable=False,
+        last_error_class=exc.__class__.__name__,
+        last_error_message=str(exc),
+    )
+
+
+def _retry_delay(attempt: int) -> float:
+    base = max(float(settings.REFINEMENT_OPENAI_BACKOFF_BASE_SEC), 0.0)
+    maximum = max(float(settings.REFINEMENT_OPENAI_BACKOFF_MAX_SEC), base or 0.0)
+    delay = min(maximum, base * (2 ** max(attempt - 1, 0)))
+    return delay + random.uniform(0.0, 1.0)
+
+
+def _run_openai_operation(
+    *,
+    stage: str,
+    story_id: int | None,
+    operation,
+) -> tuple[Any, dict[str, Any]]:
+    max_attempts = max(int(settings.REFINEMENT_OPENAI_MAX_ATTEMPTS), 1)
+    last_error: OpenAIRefinementError | None = None
+    for attempt in range(1, max_attempts + 1):
+        started_at = time.monotonic()
+        log_info("openai_attempt", stage=stage, story_id=story_id, attempt=attempt, max_attempts=max_attempts)
+        try:
+            result = operation()
+            metadata: dict[str, Any] = {"attempt_count": attempt}
+            if last_error is not None:
+                metadata["last_error_class"] = last_error.last_error_class or last_error.__class__.__name__
+                metadata["last_error_message"] = last_error.last_error_message or str(last_error)
+            return result, metadata
+        except Exception as exc:
+            error = _classify_openai_request_error(exc, stage=stage, story_id=story_id)
+            error.attempt_count = attempt
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            if not error.retryable or attempt >= max_attempts:
+                log_error(
+                    "openai_retry_exhausted",
+                    stage=stage,
+                    story_id=story_id,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    elapsed_ms=elapsed_ms,
+                    status_code=error.status_code,
+                    error_class=error.last_error_class or error.__class__.__name__,
+                    error_message=error.last_error_message or str(error),
+                    response_summary=error.response_summary,
+                )
+                raise error
+            delay = _retry_delay(attempt)
+            log_info(
+                "openai_retry_scheduled",
+                stage=stage,
+                story_id=story_id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                elapsed_ms=elapsed_ms,
+                delay_sec=round(delay, 3),
+                status_code=error.status_code,
+                error_class=error.last_error_class or error.__class__.__name__,
+                error_message=error.last_error_message or str(error),
+                response_summary=error.response_summary,
+            )
+            last_error = error
+            time.sleep(delay)
+    raise AssertionError("unreachable")
 
 
 def ensure_default_prompt_versions(session: Session) -> None:
@@ -199,7 +361,12 @@ def _parse_candidate_payloads(parsed: dict[str, Any], *, candidate_offset: int, 
     return candidates
 
 
-def extract_concept_payload(story: Story, *, session: Session | None = None) -> dict[str, Any]:
+def extract_concept_payload(
+    story: Story,
+    *,
+    session: Session | None = None,
+    include_retry_metadata: bool = False,
+) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
     source_text = story.body_md or story.title
     fallback = {
         "concept_key": re.sub(r"[^a-z0-9]+", "-", _object_focus(f"{story.title} {source_text}").lower()).strip("-") or f"story-{story.id}",
@@ -210,7 +377,8 @@ def extract_concept_payload(story: Story, *, session: Session | None = None) -> 
         "extraction_metadata": {"source": "heuristic"},
     }
     if not settings.OPENAI_API_KEY:
-        return fallback
+        metadata = {"attempt_count": 0}
+        return (fallback, metadata) if include_retry_metadata else fallback
     prompt = active_prompt(session, "generator").body if session else PROMPT_DEFAULTS["generator"]["body"]
     payload = {
         "model": settings.OPENAI_SCRIPT_MODEL,
@@ -251,7 +419,7 @@ def extract_concept_payload(story: Story, *, session: Session | None = None) -> 
             }
         },
     }
-    try:
+    def _operation() -> dict[str, Any]:
         response = requests.post(
             "https://api.openai.com/v1/responses",
             headers={
@@ -262,22 +430,42 @@ def extract_concept_payload(story: Story, *, session: Session | None = None) -> 
             timeout=60,
         )
         response.raise_for_status()
-        output_text = _responses_output_text(response.json())
-        if isinstance(output_text, str):
-            parsed = json.loads(output_text)
-            return {
-                "concept_key": _clip(str(parsed.get("concept_key") or fallback["concept_key"]), 80).lower().replace(" ", "-"),
-                "concept_label": str(parsed.get("concept_label") or fallback["concept_label"]),
-                "anomaly_type": str(parsed.get("anomaly_type") or fallback["anomaly_type"]),
-                "object_focus": str(parsed.get("object_focus") or fallback["object_focus"]),
-                "specificity": str(parsed.get("specificity") or fallback["specificity"]),
-                "extraction_metadata": {"source": "openai"},
-            }
-    except Exception as exc:
-        log_error("refinement_extract_concept_openai_error", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL, error=str(exc))
-        raise RuntimeError(f"OpenAI concept extraction failed for story {story.id}: {exc}") from exc
-    log_error("refinement_extract_concept_invalid_response", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL)
-    raise RuntimeError(f"OpenAI concept extraction returned invalid JSON for story {story.id}")
+        response_payload = response.json()
+        output_text = _responses_output_text(response_payload)
+        if not isinstance(output_text, str):
+            raise OpenAIRefinementError(
+                f"OpenAI extract returned no output text for story {story.id}",
+                retryable=False,
+                response_summary=_response_summary(response_payload),
+            )
+        parsed = json.loads(output_text)
+        return {
+            "concept_key": _clip(str(parsed.get("concept_key") or fallback["concept_key"]), 80).lower().replace(" ", "-"),
+            "concept_label": str(parsed.get("concept_label") or fallback["concept_label"]),
+            "anomaly_type": str(parsed.get("anomaly_type") or fallback["anomaly_type"]),
+            "object_focus": str(parsed.get("object_focus") or fallback["object_focus"]),
+            "specificity": str(parsed.get("specificity") or fallback["specificity"]),
+            "extraction_metadata": {"source": "openai"},
+        }
+
+    try:
+        concept_payload, retry_metadata = _run_openai_operation(
+            stage="extract",
+            story_id=story.id,
+            operation=_operation,
+        )
+        return (concept_payload, retry_metadata) if include_retry_metadata else concept_payload
+    except OpenAIRefinementError as exc:
+        log_error(
+            "refinement_extract_concept_openai_error",
+            story_id=story.id,
+            model=settings.OPENAI_SCRIPT_MODEL,
+            error=str(exc),
+            attempt_count=exc.attempt_count,
+            status_code=exc.status_code,
+            response_summary=exc.response_summary,
+        )
+        raise
 
 
 def upsert_story_concept(session: Session, story: Story, payload: dict[str, Any]) -> StoryConcept:
@@ -412,9 +600,16 @@ def generate_candidate_payloads(
     concept: StoryConcept | None,
     candidate_count: int,
     session: Session | None = None,
-) -> list[dict[str, Any]]:
+    include_retry_metadata: bool = False,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], dict[str, Any]]:
     if not settings.OPENAI_API_KEY:
-        return _fallback_candidates(story, concept, candidate_count)
+        candidates = _fallback_candidates(story, concept, candidate_count)
+        metadata = {
+            "attempt_count": 0,
+            "fallback_used": True,
+            "fallback_reason": "missing_openai_api_key",
+        }
+        return (candidates, metadata) if include_retry_metadata else candidates
     generator_prompt = active_prompt(session, "generator").body if session else PROMPT_DEFAULTS["generator"]["body"]
     template_prompt = active_prompt(session, "template").body if session else PROMPT_DEFAULTS["template"]["body"]
     schema = {
@@ -472,6 +667,69 @@ def generate_candidate_payloads(
     )
     chunk_size = min(3, max(1, candidate_count))
     candidates: list[dict[str, Any]] = []
+    retry_metadata: dict[str, Any] = {"attempt_count": 0}
+
+    def _run_chunk(chunk_start: int, chunk_count: int, existing_hooks: list[str]) -> list[dict[str, Any]]:
+        payload = {
+            "model": settings.OPENAI_SCRIPT_MODEL,
+            "input": [
+                {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": json.dumps(
+                                {
+                                    "story": source_story,
+                                    "concept": concept_payload,
+                                    "template": template_prompt,
+                                    "candidate_count": chunk_count,
+                                    "candidate_offset": chunk_start,
+                                    "avoid_hooks": existing_hooks,
+                                    "notes": "Each candidate must stand on its own and should not reuse the same hook, outro, or episode arc ordering as earlier candidates.",
+                                }
+                            ),
+                        }
+                    ],
+                },
+            ],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "script_batch",
+                    "schema": schema,
+                }
+            },
+        }
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=300,
+        )
+        response.raise_for_status()
+        response_payload = response.json()
+        output_text = _responses_output_text(response_payload)
+        if not isinstance(output_text, str):
+            raise OpenAIRefinementError(
+                f"OpenAI candidate generation returned no output text for story {story.id}",
+                retryable=True,
+                response_summary=_response_summary(response_payload),
+            )
+        parsed = json.loads(output_text)
+        chunk_candidates = _parse_candidate_payloads(parsed, candidate_offset=chunk_start, candidate_limit=chunk_count)
+        if not chunk_candidates:
+            raise OpenAIRefinementError(
+                f"OpenAI candidate generation returned no candidates for story {story.id}",
+                retryable=True,
+                response_summary=_response_summary(response_payload),
+            )
+        return chunk_candidates
+
     try:
         for chunk_start in range(0, candidate_count, chunk_size):
             chunk_count = min(chunk_size, candidate_count - chunk_start)
@@ -481,63 +739,61 @@ def generate_candidate_payloads(
                 "Return materially different candidates, not near-duplicates. "
                 "Vary the framing, pacing, reveal order, threat interpretation, and ending loop line across candidates."
             )
-            payload = {
-                "model": settings.OPENAI_SCRIPT_MODEL,
-                "input": [
-                    {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": json.dumps(
-                                    {
-                                        "story": source_story,
-                                        "concept": concept_payload,
-                                        "template": template_prompt,
-                                        "candidate_count": chunk_count,
-                                        "candidate_offset": chunk_start,
-                                        "avoid_hooks": existing_hooks,
-                                        "notes": "Each candidate must stand on its own and should not reuse the same hook, outro, or episode arc ordering as earlier candidates.",
-                                    }
-                                ),
-                            }
-                        ],
-                    },
-                ],
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "script_batch",
-                        "schema": schema,
-                    }
-                },
-            }
-            response = requests.post(
-                "https://api.openai.com/v1/responses",
-                headers={
-                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=300,
+            chunk_candidates, chunk_retry_metadata = _run_openai_operation(
+                stage="generate",
+                story_id=story.id,
+                operation=lambda chunk_start=chunk_start, chunk_count=chunk_count, existing_hooks=existing_hooks: _run_chunk(
+                    chunk_start,
+                    chunk_count,
+                    existing_hooks,
+                ),
             )
-            response.raise_for_status()
-            output_text = _responses_output_text(response.json())
-            if not isinstance(output_text, str):
-                raise RuntimeError(f"OpenAI candidate generation returned no output text for story {story.id}")
-            parsed = json.loads(output_text)
-            chunk_candidates = _parse_candidate_payloads(parsed, candidate_offset=chunk_start, candidate_limit=chunk_count)
-            if not chunk_candidates:
-                raise RuntimeError(f"OpenAI candidate generation returned no candidates for story {story.id}")
+            retry_metadata["attempt_count"] = max(
+                int(retry_metadata.get("attempt_count") or 0),
+                int(chunk_retry_metadata.get("attempt_count") or 0),
+            )
+            if chunk_retry_metadata.get("last_error_class"):
+                retry_metadata["last_error_class"] = chunk_retry_metadata["last_error_class"]
+            if chunk_retry_metadata.get("last_error_message"):
+                retry_metadata["last_error_message"] = chunk_retry_metadata["last_error_message"]
             candidates.extend(chunk_candidates)
         if candidates:
-            return candidates[:candidate_count]
-    except Exception as exc:
-        log_error("refinement_generate_candidates_openai_error", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL, error=str(exc))
-        raise RuntimeError(f"OpenAI candidate generation failed for story {story.id}: {exc}") from exc
-    log_error("refinement_generate_candidates_invalid_response", story_id=story.id, model=settings.OPENAI_SCRIPT_MODEL)
-    raise RuntimeError(f"OpenAI candidate generation returned invalid JSON for story {story.id}")
+            result = candidates[:candidate_count]
+            return (result, retry_metadata) if include_retry_metadata else result
+    except OpenAIRefinementError as exc:
+        error_text = str(exc).lower()
+        if exc.retryable and ("no candidates" in error_text or "no output text" in error_text):
+            fallback = _fallback_candidates(story, concept, candidate_count)
+            if fallback:
+                metadata = {
+                    "attempt_count": exc.attempt_count,
+                    "last_error_class": exc.last_error_class or exc.__class__.__name__,
+                    "last_error_message": exc.last_error_message or str(exc),
+                    "fallback_used": True,
+                    "fallback_reason": "openai_empty_response",
+                }
+                log_info(
+                    "refinement_fallback_used",
+                    stage="generate",
+                    story_id=story.id,
+                    attempt_count=exc.attempt_count,
+                    fallback_reason=metadata["fallback_reason"],
+                )
+                return (fallback, metadata) if include_retry_metadata else fallback
+        log_error(
+            "refinement_generate_candidates_openai_error",
+            story_id=story.id,
+            model=settings.OPENAI_SCRIPT_MODEL,
+            error=str(exc),
+            attempt_count=exc.attempt_count,
+            status_code=exc.status_code,
+            response_summary=exc.response_summary,
+        )
+        raise
+    raise OpenAIRefinementError(
+        f"OpenAI candidate generation returned invalid JSON for story {story.id}",
+        retryable=False,
+    )
 
 
 def persist_candidates(
