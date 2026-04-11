@@ -1,15 +1,18 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   activatePromptVersion,
   archivePromptVersion,
   getPublishPlatformSettings,
   listPromptVersions,
+  rescheduleReleaseQueue,
   updatePublishPlatformSettings,
 } from "@/lib/stories";
 import { ActionButton, LoadingState, PageHeader, Panel, SectionHeading, StatusBadge } from "@/components/ui-surfaces";
 
 export default function SettingsRoute() {
   const queryClient = useQueryClient();
+  const [scheduleCron, setScheduleCron] = useState("");
   const platformSettingsQuery = useQuery({
     queryKey: ["publish-platform-settings"],
     queryFn: getPublishPlatformSettings,
@@ -40,6 +43,30 @@ export default function SettingsRoute() {
     },
   });
 
+  const updateScheduleMutation = useMutation({
+    mutationFn: (shortScheduleCronUtc: string) =>
+      updatePublishPlatformSettings({ short_schedule_cron_utc: shortScheduleCronUtc }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["publish-platform-settings"] });
+    },
+  });
+
+  const rescheduleMutation = useMutation({
+    mutationFn: rescheduleReleaseQueue,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["release-queue"] });
+    },
+  });
+
+  const platformSettings = platformSettingsQuery.data;
+  const activePlatforms = platformSettings?.active_platforms ?? [];
+
+  useEffect(() => {
+    if (platformSettings) {
+      setScheduleCron(platformSettings.short_schedule_cron_utc ?? "");
+    }
+  }, [platformSettings]);
+
   if (promptsQuery.isLoading) {
     return <LoadingState label="Loading settings…" className="min-h-56" />;
   }
@@ -51,8 +78,6 @@ export default function SettingsRoute() {
     acc[prompt.kind] = bucket;
     return acc;
   }, {});
-  const platformSettings = platformSettingsQuery.data;
-  const activePlatforms = platformSettings?.active_platforms ?? [];
 
   const togglePlatform = (platform: string) => {
     const nextPlatforms = activePlatforms.includes(platform)
@@ -119,6 +144,68 @@ export default function SettingsRoute() {
               : "Unable to update publish platforms."}
           </p>
         ) : null}
+      </Panel>
+      <Panel className="space-y-4">
+        <SectionHeading
+          eyebrow="Cadence"
+          title="Short-form schedule"
+          description="Set the UTC cron expression used for queued shorts. Save the cron, then reschedule the current queue if you want the existing backlog to move to the new cadence."
+        />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+          <div className="space-y-3">
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-white">Cron expression (UTC)</span>
+              <input
+                value={scheduleCron}
+                onChange={(event) => setScheduleCron(event.target.value)}
+                placeholder="0 */4 * * *"
+                className="w-full rounded-[0.6rem] border border-white/12 bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-300/45"
+              />
+            </label>
+            <div className="flex flex-wrap gap-3">
+              <ActionButton
+                onClick={() => updateScheduleMutation.mutate(scheduleCron)}
+                disabled={updateScheduleMutation.isPending}
+              >
+                {updateScheduleMutation.isPending ? "Saving cadence…" : "Save cadence"}
+              </ActionButton>
+              <ActionButton
+                tone="secondary"
+                onClick={() => rescheduleMutation.mutate()}
+                disabled={rescheduleMutation.isPending}
+              >
+                {rescheduleMutation.isPending ? "Rescheduling…" : "Reschedule queue"}
+              </ActionButton>
+            </div>
+            {updateScheduleMutation.isError ? (
+              <p className="text-sm text-rose-200">
+                {updateScheduleMutation.error instanceof Error
+                  ? updateScheduleMutation.error.message
+                  : "Unable to save the cron schedule."}
+              </p>
+            ) : null}
+            {rescheduleMutation.isError ? (
+              <p className="text-sm text-rose-200">
+                {rescheduleMutation.error instanceof Error
+                  ? rescheduleMutation.error.message
+                  : "Unable to reschedule the queue."}
+              </p>
+            ) : null}
+          </div>
+          <div className="rounded-[1.2rem] border border-white/8 bg-white/[0.03] p-4">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
+              Current interpretation
+            </p>
+            <p className="mt-3 text-lg font-semibold text-white">
+              {platformSettings?.short_schedule_summary ?? "Using explicit slot list"}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">
+              {platformSettings
+                ? `${platformSettings.short_slots_per_day} per day. Next-day UTC times: ${platformSettings.short_slots_utc.join(", ") || "none"}.`
+                : "Loading cadence…"}
+            </p>
+          </div>
+        </div>
       </Panel>
       <div className="grid gap-4 xl:grid-cols-2">
         {Object.entries(grouped).map(([kind, versions]) => (

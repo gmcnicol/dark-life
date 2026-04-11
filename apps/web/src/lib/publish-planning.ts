@@ -27,7 +27,7 @@ export function buildQueueRunwaySummary(
   stories: Story[],
   publishSettings?: PublishPlatformSettings | null,
 ): QueueRunwaySummary {
-  const slotsPerDay = Math.max(publishSettings?.short_slots_utc?.length ?? 0, 1);
+  const slotsPerDay = Math.max(publishSettings?.short_slots_per_day ?? publishSettings?.short_slots_utc?.length ?? 0, 1);
   const queuedShorts = releases.filter(isQueuedShort).length;
   const queuedStoryIds = new Set(releases.filter(isQueuedShort).map((release) => release.story_id));
   const averageShortsPerStory =

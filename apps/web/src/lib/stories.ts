@@ -311,6 +311,9 @@ export interface PublishPlatformSettings {
   active_platforms: string[];
   weekly_supported_platforms: string[];
   short_slots_utc: string[];
+  short_slots_per_day: number;
+  short_schedule_cron_utc?: string | null;
+  short_schedule_summary?: string | null;
 }
 
 export interface ReleaseRescheduleResult {
@@ -470,7 +473,7 @@ export async function getPublishPlatformSettings(): Promise<PublishPlatformSetti
 }
 
 export async function updatePublishPlatformSettings(
-  payload: { active_platforms: string[] },
+  payload: { active_platforms?: string[]; short_schedule_cron_utc?: string | null },
 ): Promise<PublishPlatformSettings> {
   return adminFetch<PublishPlatformSettings>("/api/admin/settings/publish-platforms", {
     method: "PUT",

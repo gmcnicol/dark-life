@@ -1161,7 +1161,7 @@ def reschedule_release_queue(
     if not releases:
         return ReleaseRescheduleResult(total_rescheduled=0, releases=[])
 
-    slots = short_release_schedule_from(datetime.now(timezone.utc), count=len(releases))
+    slots = short_release_schedule_from(datetime.now(timezone.utc), count=len(releases), session=session)
     for release, publish_at in zip(releases, slots, strict=True):
         release.publish_at = publish_at
         release.last_error = None

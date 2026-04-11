@@ -353,8 +353,12 @@ class Settings(BaseSettings):
         description="Comma-separated list of active publish platforms",
     )
     SHORTS_PUBLISH_SLOTS_UTC: str = Field(
-        default="08:00,13:00,18:00",
+        default="00:00,04:00,08:00,12:00,16:00,20:00",
         description="Comma-separated UTC publish slots for short-form releases in HH:MM format",
+    )
+    SHORTS_PUBLISH_CRON_UTC: str = Field(
+        default="",
+        description="Optional cron expression in UTC for short-form release scheduling",
     )
     SHORTS_PUBLISH_HOUR_UTC: int = Field(
         default=12,

@@ -79,7 +79,7 @@ export default function DashboardRoute() {
   const flats = insightsSummary?.flat ?? 0;
   const pulseReleases = releaseQueue.filter((release) => Boolean(release.early_signal));
   const runway = buildQueueRunwaySummary(releaseQueue, stories, publishSettingsQuery.data);
-  const configuredSlotsPerDay = publishSettingsQuery.data?.short_slots_utc?.length ?? 0;
+  const configuredSlotsPerDay = publishSettingsQuery.data?.short_slots_per_day ?? publishSettingsQuery.data?.short_slots_utc?.length ?? 0;
   const cadenceKnown = configuredSlotsPerDay > 0;
   const displayedRunwayDays = cadenceKnown ? runway.queuedDays.toFixed(1) : "—";
   const topStories = activeStories.slice(0, 5);

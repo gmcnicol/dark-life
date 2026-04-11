@@ -33,6 +33,7 @@ MANUAL_PLATFORMS = {"tiktok"}
 SHORT_PLATFORMS = {"youtube", "instagram", "tiktok"}
 WEEKLY_PLATFORMS = {"youtube"}
 SIGNED_URL_TTL_SECONDS = 15 * 60
+SHORT_PUBLISH_SCHEDULE_KEY = "short_publish_schedule"
 
 
 def env_active_publish_platforms() -> list[str]:
@@ -47,6 +48,31 @@ def env_active_publish_platforms() -> list[str]:
 
 def configured_publish_platforms() -> list[str]:
     return env_active_publish_platforms()
+
+
+def _normalize_short_schedule_cron(raw: str | None) -> str | None:
+    candidate = (raw or "").strip()
+    return candidate or None
+
+
+def env_short_schedule_cron_utc() -> str | None:
+    return _normalize_short_schedule_cron(settings.SHORTS_PUBLISH_CRON_UTC)
+
+
+def _short_schedule_setting(session: Session | None = None) -> dict[str, Any] | None:
+    if session is None:
+        return None
+    setting = session.exec(select(StudioSetting).where(StudioSetting.key == SHORT_PUBLISH_SCHEDULE_KEY)).first()
+    if setting and isinstance(setting.value, dict):
+        return setting.value
+    return None
+
+
+def active_short_schedule_cron_utc(session: Session | None = None) -> str | None:
+    setting = _short_schedule_setting(session)
+    if setting:
+        return _normalize_short_schedule_cron(setting.get("cron_utc") if isinstance(setting, dict) else None)
+    return env_short_schedule_cron_utc()
 
 
 def active_publish_platforms(session: Session | None = None) -> list[str]:
@@ -66,6 +92,118 @@ def active_publish_platforms(session: Session | None = None) -> list[str]:
                 if platforms:
                     return list(dict.fromkeys(platforms))
     return allowed
+
+
+def _parse_cron_number(raw: str, *, minimum: int, maximum: int, field_name: str) -> int:
+    value = int(raw)
+    if field_name == "weekday" and value == 7:
+        value = 0
+    if value < minimum or value > maximum:
+        raise ValueError(f"Invalid {field_name} value: {raw!r}")
+    return value
+
+
+def _expand_cron_field(expression: str, *, minimum: int, maximum: int, field_name: str) -> tuple[set[int], bool]:
+    expr = expression.strip()
+    if not expr:
+        raise ValueError(f"Invalid cron field for {field_name!r}")
+    unrestricted = expr == "*"
+    values: set[int] = set()
+    for part in expr.split(","):
+        chunk = part.strip()
+        if not chunk:
+            raise ValueError(f"Invalid cron field for {field_name!r}")
+        step = 1
+        base = chunk
+        if "/" in chunk:
+            base, step_text = chunk.split("/", 1)
+            step = int(step_text)
+            if step <= 0:
+                raise ValueError(f"Invalid cron step for {field_name!r}")
+        if base == "*":
+            start = minimum
+            end = maximum
+        elif "-" in base:
+            start_text, end_text = base.split("-", 1)
+            start = _parse_cron_number(start_text, minimum=minimum, maximum=maximum, field_name=field_name)
+            end = _parse_cron_number(end_text, minimum=minimum, maximum=maximum, field_name=field_name)
+            if start > end:
+                raise ValueError(f"Invalid cron range for {field_name!r}")
+        else:
+            start = _parse_cron_number(base, minimum=minimum, maximum=maximum, field_name=field_name)
+            end = start
+        values.update(range(start, end + 1, step))
+    return values, unrestricted
+
+
+def _parse_short_schedule_cron(cron_utc: str) -> dict[str, tuple[set[int], bool]]:
+    parts = cron_utc.split()
+    if len(parts) != 5:
+        raise ValueError("Cron must have exactly 5 fields")
+    minute, hour, day, month, weekday = parts
+    return {
+        "minute": _expand_cron_field(minute, minimum=0, maximum=59, field_name="minute"),
+        "hour": _expand_cron_field(hour, minimum=0, maximum=23, field_name="hour"),
+        "day": _expand_cron_field(day, minimum=1, maximum=31, field_name="day"),
+        "month": _expand_cron_field(month, minimum=1, maximum=12, field_name="month"),
+        "weekday": _expand_cron_field(weekday, minimum=0, maximum=6, field_name="weekday"),
+    }
+
+
+def describe_short_schedule_cron(cron_utc: str) -> str:
+    parsed = _parse_short_schedule_cron(cron_utc)
+    minutes, _minute_any = parsed["minute"]
+    hours, hour_any = parsed["hour"]
+    _days, day_any = parsed["day"]
+    _months, month_any = parsed["month"]
+    _weekdays, weekday_any = parsed["weekday"]
+    if month_any and day_any and weekday_any and len(minutes) == 1 and not hour_any:
+        minute = next(iter(minutes))
+        hour_values = sorted(hours)
+        if len(hour_values) > 1:
+            step = hour_values[1] - hour_values[0]
+            if step > 0 and hour_values == list(range(0, 24, step)):
+                return f"Every {step} hours at minute {minute:02d} UTC"
+        formatted = ", ".join(f"{hour:02d}:{minute:02d}" for hour in hour_values)
+        return f"Every day at {formatted} UTC"
+    return f"UTC cron: {cron_utc}"
+
+
+def _cron_matches(candidate: datetime, parsed: dict[str, tuple[set[int], bool]]) -> bool:
+    minutes, _minute_any = parsed["minute"]
+    hours, _hour_any = parsed["hour"]
+    days, day_any = parsed["day"]
+    months, _month_any = parsed["month"]
+    weekdays, weekday_any = parsed["weekday"]
+    if candidate.minute not in minutes or candidate.hour not in hours or candidate.month not in months:
+        return False
+    day_match = candidate.day in days
+    weekday_match = candidate.weekday() in weekdays
+    if day_any and weekday_any:
+        return day_match and weekday_match
+    if day_any:
+        return weekday_match
+    if weekday_any:
+        return day_match
+    return day_match or weekday_match
+
+
+def _cron_schedule_from(anchor: datetime, *, count: int, cron_utc: str) -> list[datetime]:
+    if count <= 0:
+        return []
+    parsed = _parse_short_schedule_cron(cron_utc)
+    candidate = anchor.astimezone(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    scheduled: list[datetime] = []
+    limit = max(count * 24 * 60, 24 * 60)
+    steps = 0
+    while len(scheduled) < count and steps < limit:
+        if _cron_matches(candidate, parsed):
+            scheduled.append(candidate)
+        candidate += timedelta(minutes=1)
+        steps += 1
+    if len(scheduled) < count:
+        raise ValueError(f"Unable to generate {count} schedule slots from cron {cron_utc!r}")
+    return scheduled
 
 
 def delivery_mode_for_platform(platform: str) -> str:
@@ -273,6 +411,26 @@ def _shorts_publish_slots() -> list[tuple[int, int]]:
     return sorted(set(slots))
 
 
+def derived_short_slots_utc(session: Session | None = None) -> list[str]:
+    cron_utc = active_short_schedule_cron_utc(session)
+    if cron_utc:
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = day_start + timedelta(days=1)
+        candidate = day_start
+        slots: list[str] = []
+        parsed = _parse_short_schedule_cron(cron_utc)
+        while candidate < end:
+            if _cron_matches(candidate, parsed):
+                slots.append(candidate.strftime("%H:%M"))
+            candidate += timedelta(minutes=1)
+        return slots
+    return [f"{hour:02d}:{minute:02d}" for hour, minute in _shorts_publish_slots()]
+
+
+def derived_short_slots_per_day(session: Session | None = None) -> int:
+    return max(len(derived_short_slots_utc(session)), 1)
+
+
 def next_weekday_publish_slot(
     *,
     after: datetime | None = None,
@@ -323,12 +481,15 @@ def short_release_schedule(session: Session, *, count: int, now: datetime | None
     platforms = active_publish_platforms(session)
     anchor = _latest_release_time(session, variant=RenderVariant.SHORT.value, platforms=platforms)
     base = max([candidate for candidate in [anchor, now, datetime.now(timezone.utc)] if candidate is not None])
-    return short_release_schedule_from(base, count=count)
+    return short_release_schedule_from(base, count=count, session=session)
 
 
-def short_release_schedule_from(anchor: datetime, *, count: int) -> list[datetime]:
+def short_release_schedule_from(anchor: datetime, *, count: int, session: Session | None = None) -> list[datetime]:
     if count <= 0:
         return []
+    cron_utc = active_short_schedule_cron_utc(session)
+    if cron_utc:
+        return _cron_schedule_from(anchor, count=count, cron_utc=cron_utc)
     slots = _shorts_publish_slots()
     scheduled: list[datetime] = []
     cursor = anchor.astimezone(timezone.utc)
