@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import PublishQueue from "@/components/publish-queue";
 import { ActionButton, LoadingState, PageHeader, PageStatusBar, StatusBadge } from "@/components/ui-surfaces";
 import { getInsightsSummary, listReleaseQueue, rescheduleReleaseQueue } from "@/lib/stories";
+import { formatLocalDateTime, isSameLocalDay } from "@/lib/utils";
 
 function platformLabel(platform: string): string {
   if (platform === "youtube") {
@@ -22,11 +23,7 @@ function telemetryTimestampLabel(updatedAt: number): string {
   if (!updatedAt) {
     return "Awaiting sync";
   }
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(updatedAt);
+  return formatLocalDateTime(updatedAt, "Awaiting sync");
 }
 
 export default function PublishRoute() {
@@ -67,17 +64,7 @@ export default function PublishRoute() {
         (item) => item.status === "ready" || item.status === "approved",
       ).length,
       manualHandoff: filteredReleases.filter((item) => item.status === "manual_handoff").length,
-      scheduledToday: filteredReleases.filter((item) => {
-        if (!item.publish_at) {
-          return false;
-        }
-        const date = new Date(item.publish_at);
-        return (
-          date.getUTCFullYear() === now.getUTCFullYear() &&
-          date.getUTCMonth() === now.getUTCMonth() &&
-          date.getUTCDate() === now.getUTCDate()
-        );
-      }).length,
+      scheduledToday: filteredReleases.filter((item) => isSameLocalDay(item.publish_at, now)).length,
       winners: filteredReleases.filter((item) => item.early_signal?.state === "winner").length,
       flats: filteredReleases.filter((item) => item.early_signal?.state === "flat").length,
     }),

@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { canRequeueJob, isStaleJob, listJobs, mapJobKind, mapJobStatus, requeueJob, type Job } from "@/lib/jobs";
+import { formatLocalDateTime } from "@/lib/utils";
 import { ActionButton, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 function toneForJob(status: Job["status"]): "neutral" | "accent" | "success" | "warning" | "danger" {
@@ -19,14 +20,7 @@ function toneForJob(status: Job["status"]): "neutral" | "accent" | "success" | "
 }
 
 function formatTimestamp(value?: string | null): string {
-  if (!value) {
-    return "Unknown";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-  return date.toLocaleString();
+  return formatLocalDateTime(value, "Unknown");
 }
 
 export default function JobTable({ storyId }: { storyId?: number }) {

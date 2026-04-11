@@ -8,6 +8,7 @@ import { AgGridReact } from "ag-grid-react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import type { Release } from "@/lib/stories";
 import { approveRelease, clearRelease, completeManualPublish, retryRelease } from "@/lib/stories";
+import { formatLocalDateTime } from "@/lib/utils";
 import { ActionButton, DataGridSurface, EmptyState, Panel, SectionHeading, StatusBadge } from "./ui-surfaces";
 
 type QueueRow = Release & {
@@ -99,19 +100,7 @@ function targetLabel(release: Release): string {
 }
 
 function formatDateTime(value?: string | null): string {
-  if (!value) {
-    return "Not set";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Not set";
-  }
-  return new Intl.DateTimeFormat("en-GB", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return formatLocalDateTime(value, "Not set");
 }
 
 const baseColumns: Array<ColDef<QueueRow>> = [

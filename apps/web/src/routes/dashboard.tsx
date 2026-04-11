@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { enqueueRedditIncremental, getInsightsSummary, getPublishPlatformSettings, listReleaseQueue, listStories } from "@/lib/stories";
 import { buildQueueRunwaySummary } from "@/lib/publish-planning";
+import { formatLocalDateTime, isSameLocalDay } from "@/lib/utils";
 import { STATUS_LABELS, nextWorkspaceRoute, statusTone } from "@/lib/workflow";
 import {
   ActionButton,
@@ -19,23 +20,7 @@ function telemetryTimestampLabel(updatedAt: number): string {
   if (!updatedAt) {
     return "Awaiting sync";
   }
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(updatedAt);
-}
-
-function isSameUtcDay(value: string | null | undefined, now: Date): boolean {
-  if (!value) {
-    return false;
-  }
-  const date = new Date(value);
-  return (
-    date.getUTCFullYear() === now.getUTCFullYear() &&
-    date.getUTCMonth() === now.getUTCMonth() &&
-    date.getUTCDate() === now.getUTCDate()
-  );
+  return formatLocalDateTime(updatedAt, "Awaiting sync");
 }
 
 export default function DashboardRoute() {
@@ -74,7 +59,7 @@ export default function DashboardRoute() {
     .sort((a, b) => a.id - b.id);
 
   const insightsSummary = insightsSummaryQuery.data;
-  const scheduledToday = releaseQueue.filter((release) => isSameUtcDay(release.publish_at, now)).length;
+  const scheduledToday = releaseQueue.filter((release) => isSameLocalDay(release.publish_at, now)).length;
   const winners = insightsSummary?.winners ?? 0;
   const flats = insightsSummary?.flat ?? 0;
   const pulseReleases = releaseQueue.filter((release) => Boolean(release.early_signal));

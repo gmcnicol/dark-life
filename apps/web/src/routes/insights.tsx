@@ -12,6 +12,7 @@ import {
   type MetricsSnapshot,
   type Release,
 } from "@/lib/stories";
+import { formatLocalDateTime } from "@/lib/utils";
 import { ActionLink, DataGridSurface, EmptyState, LoadingState, PageHeader, Panel, SectionHeading, StatusBadge } from "@/components/ui-surfaces";
 
 type InsightRow = Release & {
@@ -26,15 +27,7 @@ type InsightRow = Release & {
 };
 
 function formatStamp(value?: string | null): string {
-  if (!value) {
-    return "Awaiting metrics";
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return formatLocalDateTime(value, "Awaiting metrics");
 }
 
 function compactNumber(value: number): string {

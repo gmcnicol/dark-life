@@ -8,6 +8,7 @@ import { AgGridReact } from "ag-grid-react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { useNavigate } from "react-router-dom";
 import { updateStoryStatus, type Story } from "@/lib/stories";
+import { formatLocalDateTime } from "@/lib/utils";
 import { STATUS_LABELS, nextWorkspaceRoute } from "@/lib/workflow";
 import { DataGridSurface, EmptyState, Panel, StatusBadge } from "./ui-surfaces";
 
@@ -370,19 +371,7 @@ function badgeTone(status: InboxRow["status"]) {
 }
 
 function formatRedditCreated(value?: string | null) {
-  if (!value) {
-    return "n/a";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "n/a";
-  }
-  return new Intl.DateTimeFormat("en-GB", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return formatLocalDateTime(value, "n/a");
 }
 
 function buildRows(stories: Story[], query: string): InboxRow[] {
